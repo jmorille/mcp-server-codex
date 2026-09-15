@@ -164,9 +164,26 @@ describe('buildReviewArgs', () => {
     assert.throws(() => buildReviewArgs({ uncommitted: true, base: 'main' }), ArgvError);
   });
 
+  test('sends a prompt on its own, with no target flag', () => {
+    // `codex exec review` treats PROMPT and the target flags as mutually
+    // exclusive: "the argument '--uncommitted' cannot be used with '[PROMPT]'".
+    // Emitting both made every prompted review die at exit code 2.
+    const args = buildReviewArgs({ prompt: 'focus on races' });
+
+    assert.equal(args.at(-1), '-');
+    assert.ok(!args.includes('--uncommitted'), 'a prompt must not drag a target flag along');
+    assert.ok(!args.includes('--base'));
+    assert.ok(!args.includes('--commit'));
+  });
+
+  test('rejects a prompt combined with an explicit target, as the CLI does', () => {
+    assert.throws(() => buildReviewArgs({ prompt: 'p', uncommitted: true }), /cannot be combined/i);
+    assert.throws(() => buildReviewArgs({ prompt: 'p', base: 'main' }), ArgvError);
+    assert.throws(() => buildReviewArgs({ prompt: 'p', commit: 'abc' }), ArgvError);
+  });
+
   test('appends the stdin marker only when custom instructions are given', () => {
     assert.ok(!buildReviewArgs({ uncommitted: true }).includes('-'));
-    assert.equal(buildReviewArgs({ uncommitted: true, prompt: 'focus on races' }).at(-1), '-');
   });
 
   test('carries the title through', () => {

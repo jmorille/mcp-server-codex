@@ -23,13 +23,18 @@ export interface ReviewToolInput extends CommonToolInput {
 export async function reviewTool(context: ToolContext, input: ReviewToolInput): Promise<HybridOutcome> {
   const common = resolveCommon(context, input);
 
-  // With no target at all Codex would pick its own default; being explicit
-  // keeps the tool's behaviour predictable across Codex versions.
+  const hasPrompt = input.prompt !== undefined && input.prompt.trim() !== '';
   const hasTarget = input.uncommitted === true || input.base !== undefined || input.commit !== undefined;
+
+  // With neither a prompt nor a target, default to reviewing uncommitted work
+  // so the tool's behaviour stays predictable across Codex versions. But never
+  // add that default alongside a prompt: the CLI rejects the combination, and
+  // injecting it here is what made every prompted review fail.
+  const defaultUncommitted = !hasPrompt && !hasTarget;
 
   const args = buildReviewArgs({
     prompt: input.prompt,
-    uncommitted: hasTarget ? input.uncommitted : true,
+    uncommitted: defaultUncommitted ? true : input.uncommitted,
     base: input.base,
     commit: input.commit,
     title: input.title,

@@ -9,13 +9,26 @@ import type { ToolContext } from './types.ts';
 
 export interface ResumeToolInput extends CommonToolInput {
   session_id?: string;
+  /** Alias: codex_exec reports this same value as thread_id. */
+  thread_id?: string;
   last?: boolean;
   prompt?: string;
 }
 
 export interface ForkToolInput extends CommonToolInput {
-  session_id: string;
+  session_id?: string;
+  thread_id?: string;
   prompt?: string;
+}
+
+/**
+ * Codex calls one identifier `thread_id` on the way out and `session_id` on the
+ * way in, for the same value. Accepting both here is what lets an agent chain
+ * codex_exec into codex_resume without renaming anything.
+ */
+function sessionIdOf(input: { session_id?: string; thread_id?: string }): string | undefined {
+  const value = input.session_id ?? input.thread_id;
+  return value !== undefined && value.trim() !== '' ? value : undefined;
 }
 
 export interface ListSessionsToolInput {
@@ -29,7 +42,7 @@ export async function resumeTool(context: ToolContext, input: ResumeToolInput): 
   const common = resolveCommon(context, input);
 
   const args = buildResumeArgs({
-    sessionId: input.session_id,
+    sessionId: sessionIdOf(input),
     last: input.last,
     prompt: input.prompt,
     sandbox: common.sandbox,
@@ -59,7 +72,7 @@ export async function forkTool(context: ToolContext, input: ForkToolInput): Prom
   const common = resolveCommon(context, input);
 
   const args = buildForkArgs({
-    sessionId: input.session_id,
+    sessionId: sessionIdOf(input) ?? '',
     prompt: input.prompt,
     sandbox: common.sandbox,
     model: input.model,

@@ -11,6 +11,8 @@
  * adds a field would start failing calls that actually succeeded.
  */
 
+import { createRequire } from 'node:module';
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
@@ -37,7 +39,19 @@ import {
 } from './schemas.ts';
 
 export const SERVER_NAME = 'mcp-server-codex';
-export const SERVER_VERSION = '0.1.0';
+
+/**
+ * Read from the manifest rather than hardcoded.
+ *
+ * A duplicated constant drifted once already and put a version on the wire
+ * that no release ever had. `package.json` sits one level above both `src/`
+ * and `dist/`, so the same relative path works in development and in the
+ * published package.
+ */
+const requireFromHere = createRequire(import.meta.url);
+export const SERVER_VERSION: string = (
+  requireFromHere('../package.json') as { version: string }
+).version;
 
 function ok(text: string, structured: Record<string, unknown>): CallToolResult {
   return { content: [{ type: 'text', text }], structuredContent: structured };
@@ -63,6 +77,35 @@ async function guard(run: () => Promise<CallToolResult>): Promise<CallToolResult
   }
 }
 
+/**
+ * snake_case everywhere, including inside nested objects.
+ *
+ * The internal types are camelCase, as TypeScript should be; the wire format is
+ * snake_case, as the rest of the tool surface is. Mixing the two in one
+ * response — which this used to do inside `usage` and `commands` — leaves the
+ * calling agent guessing which convention a given field follows.
+ */
+function usagePayload(usage: HybridOutcome['usage']): Record<string, number> | null {
+  if (usage === null) return null;
+  return {
+    input_tokens: usage.inputTokens,
+    cached_input_tokens: usage.cachedInputTokens,
+    cache_write_input_tokens: usage.cacheWriteInputTokens,
+    output_tokens: usage.outputTokens,
+    reasoning_output_tokens: usage.reasoningOutputTokens,
+  };
+}
+
+function commandsPayload(commands: HybridOutcome['commands']): Record<string, unknown>[] {
+  return commands.map((command) => ({
+    id: command.id,
+    command: command.command,
+    status: command.status,
+    exit_code: command.exitCode,
+    output: command.output,
+  }));
+}
+
 /** Flatten a run outcome into the snake_case shape tool consumers expect. */
 function outcomePayload(outcome: HybridOutcome): Record<string, unknown> {
   return {
@@ -72,8 +115,8 @@ function outcomePayload(outcome: HybridOutcome): Record<string, unknown> {
     thread_id: outcome.threadId,
     final_message: outcome.finalMessage,
     messages: outcome.messages,
-    commands: outcome.commands,
-    usage: outcome.usage,
+    commands: commandsPayload(outcome.commands),
+    usage: usagePayload(outcome.usage),
     errors: outcome.errors,
     exit_code: outcome.exitCode,
     stderr: outcome.stderr,

@@ -1,6 +1,6 @@
 {
   "name": "mcp-server-codex",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Serveur MCP pour piloter le CLI Codex localement : exec, sessions, review et génération d'images.",
   "type": "module",
   "license": "MIT",

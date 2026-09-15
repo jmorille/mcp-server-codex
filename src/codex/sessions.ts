@@ -84,6 +84,10 @@ async function readRolloutHeader(filePath: string): Promise<SessionInfo | null> 
   if (!isRecord(parsed.payload)) return null;
 
   const payload = parsed.payload;
+  // Always the id from the header, never one parsed out of the filename: the
+  // two genuinely disagree on some rollouts (observed: a file named
+  // ...-01a0a678-9d04-... whose header says 01a0a678-9c02-...). Only the header
+  // value is the one Codex will accept for a resume.
   const id = asString(payload.session_id) ?? asString(payload.id);
   if (id === null) return null;
 

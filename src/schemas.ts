@@ -64,13 +64,17 @@ export const execShape = {
 
 export const resumeShape = {
   session_id: z.string().optional().describe('Session UUID or thread name to continue. Mutually exclusive with "last".'),
+  // codex_exec reports the same value as thread_id; accepting both names lets a
+  // caller feed one tool's output straight into the next.
+  thread_id: z.string().optional().describe('Alias for session_id, matching the thread_id returned by codex_exec.'),
   last: z.boolean().optional().describe('Continue the most recent recorded session. Mutually exclusive with "session_id".'),
   prompt: z.string().optional().describe('Message to send after resuming. Omit to just replay the session.'),
   ...commonRunShape,
 };
 
 export const forkShape = {
-  session_id: z.string().min(1).describe('Session UUID or thread name to branch from. The original is left untouched.'),
+  session_id: z.string().optional().describe('Session UUID or thread name to branch from. The original is left untouched.'),
+  thread_id: z.string().optional().describe('Alias for session_id, matching the thread_id returned by codex_exec.'),
   prompt: z.string().optional().describe('Message to send in the forked session.'),
   ...commonRunShape,
 };

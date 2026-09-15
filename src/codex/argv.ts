@@ -204,8 +204,21 @@ export function buildReviewArgs(options: ReviewOptions): string[] {
     options.base !== undefined,
     options.commit !== undefined,
   ];
-  if (targets.filter(Boolean).length > 1) {
+  const targetCount = targets.filter(Boolean).length;
+  const hasPrompt = options.prompt !== undefined && options.prompt.trim() !== '';
+
+  if (targetCount > 1) {
     throw new ArgvError('Pick a single review target: uncommitted, base or commit.');
+  }
+  // `codex exec review` declares PROMPT and the target flags mutually
+  // exclusive — "the argument '--uncommitted' cannot be used with '[PROMPT]'".
+  // Emitting both makes the process die at exit code 2 before any review runs.
+  if (hasPrompt && targetCount > 0) {
+    throw new ArgvError(
+      'Custom review instructions cannot be combined with a target: codex exec review accepts ' +
+        'either a prompt or one of uncommitted/base/commit, never both. ' +
+        'Drop the target to review with instructions, or drop the prompt to review a specific target.',
+    );
   }
 
   const args = [
