@@ -18,7 +18,7 @@ Le CLI Codex est conçu pour un humain devant un terminal. Ce serveur le rend pi
 | Outil | Rôle | Installation Windows |
 |---|---|---|
 | **Codex CLI** ≥ 0.154 | le binaire piloté | `npm i -g @openai/codex` *(recommandé)* ou `winget install OpenAI.Codex` |
-| **Node.js** ≥ 22.6 | exécution du serveur | `winget install OpenJS.NodeJS` (fournit aussi `npm`) |
+| **Node.js** ≥ 22.0 | exécution du serveur (≥ 22.18 pour développer) | `winget install OpenJS.NodeJS` (fournit aussi `npm`) |
 | **git** | `codex exec` refuse de tourner hors dépôt ; requis par les cibles de revue | `winget install Git.Git` |
 
 Vous devez être authentifié côté Codex (`codex login`). Le serveur n'a besoin d'**aucune** clé API, y compris pour les images.
@@ -160,7 +160,7 @@ Deux workflows GitHub Actions, sans secret à configurer : le `GITHUB_TOKEN` fou
 
 Matrice **Node 22 et 24 × Ubuntu et Windows** : typecheck, tests, build. Windows n'est pas du zèle — l'allowlist de chemins, la gestion des lettres de lecteur et le contournement de la limite de 8191 caractères sont des comportements spécifiquement Windows.
 
-Un job supplémentaire vérifie le **plancher d'exécution** : `package.json` annonce `node >= 20.12`, ce job construit avec une chaîne récente puis charge le `dist/` sous Node 20.12. Les tests ne peuvent pas y tourner (pas de type stripping avant 22.18), mais la promesse est prouvée au lieu d'être supposée.
+Un job supplémentaire vérifie le **plancher d'exécution** : `package.json` annonce `node >= 22.0`, ce job construit avec une chaîne récente puis charge le `dist/` sous Node 22.0. Les tests ne peuvent pas y tourner (le type stripping exige 22.18), mais la promesse est prouvée au lieu d'être supposée.
 
 ### `release.yml` — sur un tag `v*`
 
@@ -198,7 +198,7 @@ npm run typecheck
 npm run build
 ```
 
-Le développement demande **Node ≥ 22.18**, première version où le type stripping est actif sans drapeau : la suite exécute les `.ts` directement. Le paquet publié, lui, n'est que du JavaScript compilé et tourne dès Node 20.12.
+Le développement demande **Node ≥ 22.18**, première version où le type stripping est actif sans drapeau : la suite exécute les `.ts` directement. Le paquet publié, lui, n'est que du JavaScript compilé et tourne dès Node 22.0 — plancher imposé par `execa`, qui déclare `node >=22` et utilise `Set.prototype.union`.
 
 Node exécute TypeScript nativement : ni `tsx` ni `ts-node`.
 
