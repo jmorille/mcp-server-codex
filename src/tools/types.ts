@@ -1,6 +1,6 @@
 import type { Mailbox } from '../bridge/mailbox.ts';
 import type { ServerConfig } from '../config.ts';
-import type { ImagePresets } from '../images/presets.ts';
+import type { PresetStore } from '../images/store.ts';
 import type { CodexRunner } from '../codex/runner.ts';
 import type { JobStore } from '../jobs/store.ts';
 import type { PathPolicy } from '../security/paths.ts';
@@ -20,5 +20,5 @@ export interface ToolContext {
   /** The Claude end of the two-way bridge. Always present: the bridge is not opt-in. */
   bridge: Mailbox;
   /** Named image presets this instance was configured with. Empty on a plain instance. */
-  imagePresets: ImagePresets;
+  presets: PresetStore;
 }

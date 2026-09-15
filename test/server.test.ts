@@ -44,6 +44,9 @@ const EXPECTED_TOOLS = [
   'codex_inbox',
   'codex_reply',
   'codex_tell',
+  'codex_preset_list',
+  'codex_preset_reload',
+  'codex_preset_set',
 ];
 
 describe('server identity', () => {
@@ -285,5 +288,103 @@ describe('calling tools', () => {
       arguments: { job_id: jobId },
     })) as { structuredContent: { cancelled: boolean } };
     assert.equal(cancelled.structuredContent.cancelled, true);
+  });
+});
+
+describe('managing presets at runtime', () => {
+  /** An instance configured with a presets file, like a real deployment. */
+  async function withPresetFile(initial: Record<string, unknown>) {
+    const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-codex-rt-')));
+    const file = path.join(workspace, 'presets.json');
+    fs.writeFileSync(file, JSON.stringify(initial));
+    const { client } = await connect({
+      CODEX_MCP_ALLOWED_ROOTS: workspace,
+      CODEX_MCP_IMAGE_PRESETS: file,
+    });
+    return { client, file };
+  }
+
+  async function imageDescription(client: Client): Promise<string> {
+    const tool = (await client.listTools()).tools.find((t) => t.name === 'codex_generate_image');
+    return tool?.description ?? '';
+  }
+
+  test('lists what the instance currently knows', async () => {
+    const { client } = await withPresetFile({ mascot: { subject: 'green' } });
+
+    const result = await client.callTool({ name: 'codex_preset_list', arguments: {} });
+    const payload = (result as { structuredContent: { presets: { name: string; subject: string | null }[] } })
+      .structuredContent;
+
+    assert.deepEqual(payload.presets.map((p) => p.name), ['mascot']);
+    assert.equal(payload.presets[0]?.subject, 'green');
+  });
+
+  test('picks up a preset added to the file, without a restart', async () => {
+    const { client, file } = await withPresetFile({ a: { subject: 'first' } });
+    fs.writeFileSync(file, JSON.stringify({ a: { subject: 'first' }, b: { subject: 'second' } }));
+
+    await client.callTool({ name: 'codex_preset_reload', arguments: {} });
+
+    const result = await client.callTool({ name: 'codex_preset_list', arguments: {} });
+    const payload = (result as { structuredContent: { presets: { name: string }[] } }).structuredContent;
+    assert.deepEqual(payload.presets.map((p) => p.name).sort(), ['a', 'b']);
+  });
+
+  test('adds a preset and makes it usable straight away', async () => {
+    const { client } = await withPresetFile({});
+
+    await client.callTool({
+      name: 'codex_preset_set',
+      arguments: { name: 'mascot', subject: 'a green ovoid character', style: 'pixel art 16-bit' },
+    });
+
+    const result = await client.callTool({ name: 'codex_preset_list', arguments: {} });
+    const payload = (result as { structuredContent: { presets: { name: string }[] } }).structuredContent;
+    assert.deepEqual(payload.presets.map((p) => p.name), ['mascot']);
+  });
+
+  test('re-advertises the presets in the tool description after a change', async () => {
+    // Without this the instance knows a preset the calling agent cannot
+    // discover — the description is built once, at registration.
+    const { client } = await withPresetFile({});
+    assert.doesNotMatch(await imageDescription(client), /mascot/);
+
+    await client.callTool({ name: 'codex_preset_set', arguments: { name: 'mascot', subject: 's' } });
+
+    assert.match(await imageDescription(client), /mascot/);
+  });
+
+  test('re-advertises after a reload too', async () => {
+    const { client, file } = await withPresetFile({});
+    fs.writeFileSync(file, JSON.stringify({ packshot: { subject: 's' } }));
+
+    await client.callTool({ name: 'codex_preset_reload', arguments: {} });
+
+    assert.match(await imageDescription(client), /packshot/);
+  });
+
+  test('reports a rejected preset as a tool error and changes nothing', async () => {
+    const { client } = await withPresetFile({ good: { subject: 'intact' } });
+
+    const result = await client.callTool({
+      name: 'codex_preset_set',
+      arguments: { name: 'bad', size: 12345 },
+    });
+
+    assert.equal((result as { isError?: boolean }).isError, true);
+    const list = await client.callTool({ name: 'codex_preset_list', arguments: {} });
+    const payload = (list as { structuredContent: { presets: { name: string }[] } }).structuredContent;
+    assert.deepEqual(payload.presets.map((p) => p.name), ['good']);
+  });
+
+  test('tells an unconfigured instance where presets come from', async () => {
+    const { client } = await connect();
+
+    const result = await client.callTool({ name: 'codex_preset_set', arguments: { name: 'x', subject: 's' } });
+
+    assert.equal((result as { isError?: boolean }).isError, true);
+    const text = (result as { content: { text: string }[] }).content[0]?.text ?? '';
+    assert.match(text, /CODEX_MCP_IMAGE_PRESETS/);
   });
 });

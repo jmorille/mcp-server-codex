@@ -178,3 +178,24 @@ export const tellShape = {
     .optional()
     .describe('Only tell this run. Omit to reach every run, which is what you want for "stop".'),
 };
+
+export const presetListShape = {};
+
+export const presetReloadShape = {};
+
+export const presetSetShape = {
+  name: z.string().min(1).describe('Name callers will pass as "preset". Replaces an existing preset of the same name.'),
+  subject: z
+    .string()
+    .optional()
+    .describe('The recurring subject, prepended to every prompt using this preset. This is the field that earns a preset.'),
+  style: z.string().optional().describe('Style or medium, e.g. "pixel art 16-bit, limited palette".'),
+  constraints: z.string().optional().describe('What images from this preset must avoid, e.g. "no watermark".'),
+  use_case: z.string().optional().describe('Taxonomy slug steering the rendering, e.g. "stylized-concept".'),
+  size: z.string().optional().describe('Default size, e.g. "1024x1024".'),
+  transparent: z.boolean().optional().describe('Ask for a transparent background by default.'),
+  reference_images: z
+    .array(z.string())
+    .optional()
+    .describe('Reference art for this subject. Each must sit inside the server allowlist.'),
+};

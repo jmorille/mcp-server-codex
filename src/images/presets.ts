@@ -60,7 +60,8 @@ export function loadImagePresets(file: string | undefined): ImagePresets {
   } catch {
     throw new ConfigError(
       `CODEX_MCP_IMAGE_PRESETS points at "${file}", which cannot be read. ` +
-        'Fix the path or unset the variable.',
+        'Fix the path, unset the variable, or create the file with an empty {} if you mean to ' +
+        'add presets later with codex_preset_set.',
     );
   }
 
@@ -73,6 +74,17 @@ export function loadImagePresets(file: string | undefined): ImagePresets {
     );
   }
 
+  return parseImagePresets(parsed, file);
+}
+
+/**
+ * Validate an already-parsed set of presets.
+ *
+ * Separate from reading the file so a candidate set can be checked *before* it
+ * replaces the live one: a rejected edit must leave the instance exactly as it
+ * was, not empty it.
+ */
+export function parseImagePresets(parsed: unknown, file: string): ImagePresets {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new ConfigError(`Image presets in "${file}" must be an object mapping a preset name to its settings.`);
   }

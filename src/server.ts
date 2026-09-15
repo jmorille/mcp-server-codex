@@ -24,6 +24,7 @@ import { applyTool } from './tools/apply.ts';
 import { generateImageTool } from './tools/image.ts';
 import { jobStatusTool, jobLogsTool, jobCancelTool } from './tools/jobs.ts';
 import { inboxTool, replyTool, tellTool } from './tools/bridge.ts';
+import { presetListTool, presetReloadTool, presetSetTool } from './tools/presets.ts';
 import type { ToolContext } from './tools/types.ts';
 import type { HybridOutcome } from './jobs/hybrid.ts';
 import {
@@ -36,6 +37,9 @@ import {
   jobLogsShape,
   jobStatusShape,
   listSessionsShape,
+  presetListShape,
+  presetReloadShape,
+  presetSetShape,
   replyShape,
   resumeShape,
   reviewShape,
@@ -138,7 +142,7 @@ function outcomePayload(outcome: HybridOutcome): Record<string, unknown> {
  * says nothing, rather than advertising a feature it cannot serve.
  */
 function presetHint(context: ToolContext): string {
-  const names = Object.keys(context.imagePresets);
+  const names = Object.keys(context.presets.all());
   if (names.length === 0) return '';
 
   return (
@@ -146,6 +150,22 @@ function presetHint(context: ToolContext): string {
     'Pass one as "preset" to reuse its subject, style and reference art instead of restating them, ' +
     'and describe only what differs in the prompt (a pose, an angle, a variation).'
   );
+}
+
+/** Kept as a constant because the preset tools rebuild this description. */
+const IMAGE_DESCRIPTION =
+  'Generate an image using the image_gen tool built into Codex, and save it to output_path. ' +
+  'No API key is needed: it runs through your Codex session. Returns the path of the file ' +
+  'written, not the image bytes.';
+
+/** One line an agent can read, rather than a dump of the structured payload. */
+function describePresets(result: { presets: { name: string }[]; count: number; file: string | null }): string {
+  if (result.count === 0) {
+    return result.file === null
+      ? 'No presets, and no presets file configured on this instance.'
+      : `No presets yet in ${result.file}.`;
+  }
+  return `${result.count} preset(s): ${result.presets.map((p) => p.name).join(', ')}.`;
 }
 
 const WRITES = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
@@ -314,14 +334,11 @@ export function createServer(context: ToolContext): McpServer {
       }),
   );
 
-  server.registerTool(
+  const imageTool = server.registerTool(
     'codex_generate_image',
     {
       title: 'Generate an image with Codex',
-      description:
-        'Generate an image using the image_gen tool built into Codex, and save it to output_path. ' +
-        'No API key is needed: it runs through your Codex session. Returns the path of the file ' +
-        'written, not the image bytes.' + presetHint(context),
+      description: IMAGE_DESCRIPTION + presetHint(context),
       inputSchema: generateImageShape,
       annotations: WRITES,
     },
@@ -464,6 +481,70 @@ export function createServer(context: ToolContext): McpServer {
       annotations: WRITES,
     },
     (input) => guard(async () => ok('Queued for Codex.', { ...(await tellTool(context, input)) })),
+  );
+
+  // --- presets, managed while the server runs ----------------------------
+  //
+  // The description of codex_generate_image names this instance's presets, and
+  // it is built once at registration. So every change here has to re-publish
+  // it: otherwise the instance knows a preset that the calling agent has no
+  // way to discover. `update` also makes the SDK emit tools/list_changed.
+
+  function republishPresets(): void {
+    imageTool.update({ description: IMAGE_DESCRIPTION + presetHint(context) });
+  }
+
+  server.registerTool(
+    'codex_preset_list',
+    {
+      title: 'List image presets',
+      description:
+        'Show the image presets this instance is configured with, in full — subject, style, constraints ' +
+        'and reference art — plus the file they come from. The description of codex_generate_image only ' +
+        'names them; use this to see what a preset actually contains before using or changing it.',
+      inputSchema: presetListShape,
+      annotations: READS,
+    },
+    () => guard(async () => {
+      const result = await presetListTool(context);
+      return ok(describePresets(result), { ...result });
+    }),
+  );
+
+  server.registerTool(
+    'codex_preset_reload',
+    {
+      title: 'Reload image presets',
+      description:
+        'Re-read the presets file from disk, picking up edits made outside this server without a restart. ' +
+        'If the file has become unusable the call fails and the presets already loaded are kept, so a bad ' +
+        'edit never leaves the instance with none.',
+      inputSchema: presetReloadShape,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    () => guard(async () => {
+      const result = await presetReloadTool(context);
+      republishPresets();
+      return ok(`Reloaded. ${describePresets(result)}`, { ...result });
+    }),
+  );
+
+  server.registerTool(
+    'codex_preset_set',
+    {
+      title: 'Add or replace an image preset',
+      description:
+        'Define a named preset for a subject drawn repeatedly, so later calls name it instead of restating ' +
+        'the description. Written to the presets file, so it survives a restart, and usable immediately. ' +
+        'Replaces a preset of the same name outright rather than merging, so a field can be removed.',
+      inputSchema: presetSetShape,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    (input) => guard(async () => {
+      const result = await presetSetTool(context, input);
+      republishPresets();
+      return ok(`Preset "${input.name}" saved. ${describePresets(result)}`, { ...result });
+    }),
   );
 
   return server;

@@ -14,7 +14,7 @@ import { loadConfig } from './config.ts';
 import type { Env, ServerConfig } from './config.ts';
 import { createCodexRunner } from './codex/runner.ts';
 import { createJobStore } from './jobs/store.ts';
-import { loadImagePresets } from './images/presets.ts';
+import { createPresetStore } from './images/store.ts';
 import { createPathPolicy } from './security/paths.ts';
 import type { ToolContext } from './tools/types.ts';
 
@@ -41,8 +41,9 @@ export function createRuntime(env: Env, cwd: string): Runtime {
     paths: createPathPolicy(config.allowedRoots),
     bridge: openMailbox(config.bridgeDir),
     // Read at startup, so a broken presets file stops the server instead of
-    // silently producing generic images later.
-    imagePresets: loadImagePresets(config.imagePresetsFile),
+    // silently producing generic images later. Reloadable afterwards: the
+    // strictness is about never running degraded, not about never changing.
+    presets: createPresetStore(config.imagePresetsFile),
   };
 
   const sweeper = setInterval(() => jobs.sweep(), SWEEP_INTERVAL_MS);

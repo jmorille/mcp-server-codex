@@ -125,6 +125,9 @@ Les jobs vivent le temps de la session MCP.
 | `codex_inbox` | Relève ce que Codex a envoyé : questions bloquantes, constats, alertes. |
 | `codex_reply` | Répond à une question de Codex ; le run en attente repart aussitôt. |
 | `codex_tell` | Envoie à Codex un message qu'il n'a pas demandé — correction, changement de cap, arrêt. |
+| `codex_preset_list` | Détail complet des presets d'image de l'instance, et le fichier d'où ils viennent. |
+| `codex_preset_reload` | Relit le fichier de presets depuis le disque, sans redémarrage. |
+| `codex_preset_set` | Ajoute ou remplace un preset, en mémoire et dans le fichier. |
 
 Les outils d'exécution acceptent en commun : `cwd`, `model`, `sandbox`, `images`, `config`, `enable`, `disable`, `output_schema`, `worktree`, `ephemeral`, `skip_git_repo_check`, `timeout_seconds`.
 
@@ -171,6 +174,25 @@ Trois choix qui méritent d'être dits :
 - **Un fichier illisible, un JSON invalide ou un champ inconnu font échouer le démarrage.** Un preset silencieusement ignoré produirait des images génériques qui ressemblent à un raté du modèle, et personne n'irait regarder la configuration.
 
 Les images de référence d'un preset passent par l'allowlist comme les autres : être de la configuration ne vaut pas dérogation.
+
+##### Modifier les presets sans redémarrer
+
+Le fichier est lu au démarrage, mais il n'y est pas figé. Trois outils couvrent la boucle de celui qui affine un sujet :
+
+```jsonc
+{ "name": "mascotte", "subject": "…", "style": "pixel art 16-bit" }   // codex_preset_set
+{}                                                                     // codex_preset_reload
+{}                                                                     // codex_preset_list
+```
+
+`codex_preset_set` écrit dans le fichier — un preset qui n'aurait vécu qu'en mémoire disparaîtrait au redémarrage sans que rien ne le dise — et remplace intégralement un preset de même nom, pour qu'un champ puisse être retiré. `codex_preset_reload` sert quand le fichier a été édité à la main.
+
+Deux garanties tiennent des deux côtés :
+
+- **Un changement refusé ne dégrade rien.** La validation porte sur l'ensemble avant de remplacer quoi que ce soit : un JSON cassé ou un champ inconnu laisse en place les presets qui marchaient, et n'écrit pas dans le fichier.
+- **L'annonce suit.** La description de `codex_generate_image` nomme les presets, et elle est construite à l'enregistrement de l'outil ; chaque changement la republie et émet `notifications/tools/list_changed`. Sans ça, l'instance connaîtrait un preset que l'agent appelant n'a aucun moyen de découvrir.
+
+Ce qui n'a **pas** été assoupli : un fichier de presets absent ou illisible arrête toujours le serveur au démarrage. Un chemin qui n'existe pas est presque toujours une faute de frappe, et démarrer sans presets est le mode d'échec que tout ceci existe pour empêcher. Pour laisser l'agent remplir le fichier, créez-le avec `{}` — c'est un acte explicite.
 
 L'outil renvoie le **chemin** du fichier, pas les octets : un PNG de 850 Ko pèse ~1,1 Mo en base64 et saturerait le contexte de l'agent appelant.
 

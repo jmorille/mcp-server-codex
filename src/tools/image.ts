@@ -145,7 +145,7 @@ async function findGeneratedImage(codexHome: string, threadId: string): Promise<
  * almost always a name typo or the wrong instance, and the message says which.
  */
 function presetFor(context: ToolContext, name: string): ImagePreset {
-  const known = Object.keys(context.imagePresets);
+  const known = Object.keys(context.presets.all());
 
   if (known.length === 0) {
     throw new Error(
@@ -155,7 +155,7 @@ function presetFor(context: ToolContext, name: string): ImagePreset {
     );
   }
 
-  const preset = context.imagePresets[name];
+  const preset = context.presets.all()[name];
   if (preset === undefined) {
     throw new Error(`Unknown image preset "${name}". This server knows: ${known.join(', ')}.`);
   }
