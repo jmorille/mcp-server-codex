@@ -3,7 +3,7 @@ import { listSessions } from '../codex/sessions.ts';
 import type { SessionInfo } from '../codex/sessions.ts';
 import { runHybrid } from '../jobs/hybrid.ts';
 import type { HybridOutcome } from '../jobs/hybrid.ts';
-import { resolveCommon } from './common.ts';
+import { bridgeArgsFor, resolveCommon } from './common.ts';
 import type { CommonToolInput } from './common.ts';
 import type { ToolContext } from './types.ts';
 
@@ -64,6 +64,7 @@ export async function resumeTool(context: ToolContext, input: ResumeToolInput): 
     stdin: input.prompt,
     cwd: common.cwd,
     timeoutMs: common.timeoutMs,
+    argsForJob: bridgeArgsFor(context),
   });
 }
 
@@ -93,6 +94,7 @@ export async function forkTool(context: ToolContext, input: ForkToolInput): Prom
     stdin: input.prompt,
     cwd: common.cwd,
     timeoutMs: common.timeoutMs,
+    argsForJob: bridgeArgsFor(context),
   });
 }
 

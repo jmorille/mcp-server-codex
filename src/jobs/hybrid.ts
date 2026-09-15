@@ -30,6 +30,14 @@ export interface HybridSpec {
   env?: Record<string, string>;
   /** 0 means: do not wait at all, return a job id immediately. */
   timeoutMs: number;
+  /**
+   * Extra arguments that can only be built once the job id exists.
+   *
+   * The bridge needs to tell the spawned Codex process which run it belongs
+   * to, and that identity is minted here, after the tool has already built its
+   * argv. Appended, so a tool's own `-c` overrides come first.
+   */
+  argsForJob?: (jobId: string) => string[];
 }
 
 export interface HybridOutcome {
@@ -58,6 +66,21 @@ function trimStderr(stderr: string): string {
   return `...[truncated]\n${stderr.slice(-STDERR_LIMIT)}`;
 }
 
+/**
+ * Splice the job-dependent arguments in, keeping a trailing `-` last.
+ *
+ * Every run tool ends its argv with `-`, which is how Codex is told the prompt
+ * arrives on stdin. Anything appended after it is read as a second positional
+ * and the run fails before the prompt is ever seen.
+ */
+function withJobArgs(spec: HybridSpec, jobId: string): string[] {
+  if (spec.argsForJob === undefined) return spec.args;
+
+  const extra = spec.argsForJob(jobId);
+  if (spec.args.at(-1) !== '-') return [...spec.args, ...extra];
+  return [...spec.args.slice(0, -1), ...extra, '-'];
+}
+
 export async function runHybrid(context: HybridContext, spec: HybridSpec): Promise<HybridOutcome> {
   const controller = new AbortController();
   const job: JobRecord = context.jobs.create({
@@ -67,9 +90,11 @@ export async function runHybrid(context: HybridContext, spec: HybridSpec): Promi
 
   let lastSummary = { threadId: null as string | null, messages: [] as string[] };
 
+  const args = withJobArgs(spec, job.id);
+
   const runPromise = context.runner
     .run({
-      args: spec.args,
+      args,
       stdin: spec.stdin,
       cwd: spec.cwd,
       env: spec.env,

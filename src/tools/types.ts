@@ -1,3 +1,4 @@
+import type { Mailbox } from '../bridge/mailbox.ts';
 import type { ServerConfig } from '../config.ts';
 import type { CodexRunner } from '../codex/runner.ts';
 import type { JobStore } from '../jobs/store.ts';
@@ -15,4 +16,6 @@ export interface ToolContext {
   runner: CodexRunner;
   jobs: JobStore;
   paths: PathPolicy;
+  /** The Claude end of the two-way bridge. Always present: the bridge is not opt-in. */
+  bridge: Mailbox;
 }

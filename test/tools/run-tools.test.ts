@@ -192,7 +192,10 @@ describe('codex_review', () => {
   test('reviews against a base branch', async () => {
     const c = fresh();
     await completeWith(c.runner, reviewTool(c, { base: 'main' }));
-    assert.deepEqual(argv(c).slice(-2), ['--base', 'main']);
+    // By adjacency, not by position: the bridge appends its own overrides, and
+    // where they land is not part of this contract.
+    const args = argv(c);
+    assert.equal(args[args.indexOf('--base') + 1], 'main');
   });
 
   test('rejects two review targets at once', async () => {

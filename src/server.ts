@@ -23,6 +23,7 @@ import { reviewTool } from './tools/review.ts';
 import { applyTool } from './tools/apply.ts';
 import { generateImageTool } from './tools/image.ts';
 import { jobStatusTool, jobLogsTool, jobCancelTool } from './tools/jobs.ts';
+import { inboxTool, replyTool, tellTool } from './tools/bridge.ts';
 import type { ToolContext } from './tools/types.ts';
 import type { HybridOutcome } from './jobs/hybrid.ts';
 import {
@@ -30,12 +31,15 @@ import {
   execShape,
   forkShape,
   generateImageShape,
+  inboxShape,
   jobCancelShape,
   jobLogsShape,
   jobStatusShape,
   listSessionsShape,
+  replyShape,
   resumeShape,
   reviewShape,
+  tellShape,
 } from './schemas.ts';
 
 export const SERVER_NAME = 'mcp-server-codex';
@@ -333,6 +337,65 @@ export function createServer(context: ToolContext): McpServer {
           { job_id: result.jobId, cancelled: result.cancelled, status: result.status },
         );
       }),
+  );
+
+  // --- the two-way bridge ------------------------------------------------
+  //
+  // Every Codex run this server starts is spawned with a bridge of its own, so
+  // these three tools are always live. They are how a run that needs a decision
+  // gets one without dying, and how this agent interrupts a run in flight.
+
+  server.registerTool(
+    'codex_inbox',
+    {
+      title: 'Read messages from Codex',
+      description:
+        'Collect anything a running Codex agent has sent — a question it is blocked on, a finding, a ' +
+        'warning. Cheap and non-blocking, so it is worth calling between other tools while a run is in ' +
+        'flight. Pass the next_cursor from the previous call to see only what is new; awaiting_answer ' +
+        'counts the questions still waiting on codex_reply.',
+      inputSchema: inboxShape,
+      annotations: READS,
+    },
+    async (input) => {
+      const result = await inboxTool(context, input);
+      const text =
+        result.count === 0
+          ? 'Nothing from Codex.'
+          : result.messages
+              .map((m) => `[${m.kind}${m.answered ? '' : ', unanswered'}] ${m.text}`)
+              .join('\n');
+      return ok(text, { ...result });
+    },
+  );
+
+  server.registerTool(
+    'codex_reply',
+    {
+      title: 'Answer a Codex question',
+      description:
+        'Answer a question codex_inbox reported. The Codex run is blocked waiting for exactly this, so ' +
+        'answering promptly is what keeps it moving; if it has already timed out the answer is still ' +
+        'delivered and collected at its next turn. Fails if no such question exists, rather than posting ' +
+        'an answer nobody is waiting for.',
+      inputSchema: replyShape,
+      annotations: WRITES,
+    },
+    (input) => guard(async () => ok('Answer delivered.', { ...(await replyTool(context, input)) })),
+  );
+
+  server.registerTool(
+    'codex_tell',
+    {
+      title: 'Send Codex a message',
+      description:
+        'Send a running Codex agent something it did not ask for — a correction, a change of direction, ' +
+        'a stop. It arrives at the next tool turn of that run rather than interrupting it mid-command. ' +
+        'Omit job_id to reach every run at once.',
+      inputSchema: tellShape,
+      annotations: WRITES,
+    },
+    (input) => guard(async () => ok('Queued for Codex.', { ...(await tellTool(context, input)) })),
   );
 
   return server;

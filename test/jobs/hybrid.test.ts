@@ -182,3 +182,57 @@ describe('event capture', () => {
     assert.equal(jobs.get(outcome.jobId)?.eventsSince(0).events.length, 2);
   });
 });
+
+describe('per-run arguments', () => {
+  test('lets a tool add arguments that depend on the job id', async () => {
+    // The bridge has to be told which run it belongs to, and that id only
+    // exists once the job is created — after the tool has built its argv.
+    const runner = createStubRunner();
+    const jobs = createJobStore({});
+
+    const call = runHybrid(
+      { runner, jobs },
+      {
+        tool: 'codex_exec',
+        args: ['exec', '--json'],
+        timeoutMs: 5_000,
+        argsForJob: (jobId) => ['-c', `thread="${jobId}"`],
+      },
+    );
+    await runner.started();
+    const seen = runner.calls.at(-1)?.args ?? [];
+    runner.settle();
+    const outcome = await call;
+
+    assert.deepEqual(seen, ['exec', '--json', '-c', `thread="${outcome.jobId}"`]);
+  });
+
+  test('keeps the trailing dash last, where codex expects the prompt marker', async () => {
+    // `codex exec ... -` means "the prompt is on stdin". Anything after that
+    // dash is read as a second positional and the run dies before it starts.
+    const runner = createStubRunner();
+    const jobs = createJobStore({});
+
+    const call = runHybrid(
+      { runner, jobs },
+      { tool: 'codex_exec', args: ['exec', '--json', '-'], timeoutMs: 5_000, argsForJob: () => ['-c', 'k=1'] },
+    );
+    await runner.started();
+    const seen = runner.calls.at(-1)?.args ?? [];
+    runner.settle();
+    await call;
+
+    assert.deepEqual(seen, ['exec', '--json', '-c', 'k=1', '-']);
+  });
+
+  test('leaves the argv untouched when a tool adds nothing', async () => {
+    const runner = createStubRunner();
+    const jobs = createJobStore({});
+
+    const call = runHybrid({ runner, jobs }, { tool: 'codex_exec', args: ['exec'], timeoutMs: 5_000 });
+    await runner.started();
+    assert.deepEqual(runner.calls.at(-1)?.args, ['exec']);
+    runner.settle();
+    await call;
+  });
+});

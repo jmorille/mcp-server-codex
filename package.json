@@ -1,14 +1,15 @@
 {
   "name": "mcp-server-codex",
   "version": "0.0.4",
-  "description": "Serveur MCP pour piloter le CLI Codex localement : exec, sessions, review et génération d'images.",
+  "description": "Serveur MCP pour piloter le CLI Codex localement : exec, sessions, review et g\u00e9n\u00e9ration d'images.",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"
   },
   "bin": {
-    "mcp-server-codex": "dist/index.js"
+    "mcp-server-codex": "dist/index.js",
+    "mcp-codex-bridge": "dist/bridge/index.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

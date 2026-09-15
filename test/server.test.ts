@@ -38,6 +38,9 @@ const EXPECTED_TOOLS = [
   'codex_job_status',
   'codex_job_logs',
   'codex_job_cancel',
+  'codex_inbox',
+  'codex_reply',
+  'codex_tell',
 ];
 
 describe('server identity', () => {

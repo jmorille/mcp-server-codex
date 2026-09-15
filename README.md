@@ -71,6 +71,10 @@ Le serveur parle **stdio**. Tous ses diagnostics vont sur `stderr` : `stdout` tr
 | `CODEX_MCP_DEFAULT_TIMEOUT_SECONDS` | `120` | Attente avant bascule en arrière-plan. `0` = toujours en arrière-plan. |
 | `CODEX_MCP_MAX_EVENTS` | `2000` | Taille du tampon d'événements par job. |
 | `CODEX_MCP_JOB_TTL_SECONDS` | `1800` | Durée de consultation d'un job terminé. |
+| `CODEX_MCP_BRIDGE_DIR` | `$CODEX_HOME/mcp-bridge` | Boîte aux lettres partagée avec les processus pont. |
+| `CODEX_MCP_BRIDGE_TIMEOUT_SECONDS` | `90` | Attente d'un `ask_claude` côté Codex avant de rendre un `question_id`. |
+| `CODEX_MCP_BRIDGE_COMMAND` | Node courant | Exécutable que Codex lance pour le pont. |
+| `CODEX_MCP_BRIDGE_ENTRY` | `dist/bridge/index.js` | Script du pont passé à cet exécutable. |
 
 Une valeur invalide fait **échouer le démarrage** (code 78) plutôt que de retomber silencieusement sur un défaut : une faute de frappe ne doit pas devenir une politique de sécurité différente de celle demandée.
 
@@ -107,6 +111,9 @@ Les jobs vivent le temps de la session MCP.
 | `codex_job_status` | État d'un run passé en arrière-plan. |
 | `codex_job_logs` | Événements JSONL paginés d'un job, filtrables par type. |
 | `codex_job_cancel` | Arrête un run en cours. |
+| `codex_inbox` | Relève ce que Codex a envoyé : questions bloquantes, constats, alertes. |
+| `codex_reply` | Répond à une question de Codex ; le run en attente repart aussitôt. |
+| `codex_tell` | Envoie à Codex un message qu'il n'a pas demandé — correction, changement de cap, arrêt. |
 
 Les outils d'exécution acceptent en commun : `cwd`, `model`, `sandbox`, `images`, `config`, `enable`, `disable`, `output_schema`, `worktree`, `ephemeral`, `skip_git_repo_check`, `timeout_seconds`.
 
@@ -129,6 +136,39 @@ Codex n'expose aucun service de génération d'images : le protocole app-server 
 
 1. **Le prompt est composé, pas transmis tel quel.** La skill attend une spécification étiquetée (`Use case:`, `Primary request:`, `Constraints:`…) ; lui donner du texte brut dégrade nettement le résultat.
 2. **Le fichier doit être retrouvé.** `image_gen` n'émet aucun item JSONL : le flux d'événements ne dit jamais où l'image a atterri. Le serveur vérifie donc `output_path`, puis se rabat sur `$CODEX_HOME/generated_images/<thread_id>/` et y copie le fichier le plus récent. Si les deux échouent, il le dit explicitement plutôt que de renvoyer un chemin fantôme.
+
+## Messagerie bidirectionnelle
+
+Le pont est **toujours actif** : chaque run lancé par ce serveur est démarré avec un serveur MCP supplémentaire, `claude_bridge`, que Codex lance lui-même. Du point de vue de Codex, l'agent Claude qui le supervise est simplement trois outils de plus.
+
+```
+agent Claude                 boîte aux lettres            run codex exec
+────────────                 ─────────────────            ──────────────
+codex_inbox   ──── lit ────▶ un fichier JSON     ◀── écrit ── ask_claude   (bloque)
+codex_reply   ─── écrit ───▶  par message        ─── lit ───▶ check_claude
+codex_tell    ─── écrit ───▶  (écriture          ─── lit ───▶ check_claude
+                              atomique)
+```
+
+**Côté Codex** (`claude_bridge`) :
+
+| Outil | Rôle |
+|---|---|
+| `ask_claude` | Pose une question et **attend** la réponse. Au-delà du délai, rend un `question_id` au lieu d'échouer : la question reste en file et se relève plus tard. |
+| `tell_claude` | Envoie un message sans attendre de réponse. |
+| `check_claude` | Relève ce que Claude a envoyé depuis le dernier passage, y compris de sa propre initiative, et collecte la réponse à un `ask_claude` expiré. |
+
+**Ce qui rend l'asynchrone supportable des deux côtés.** Claude a un rythme naturel — ses tours d'outils — donc de son côté rien ne bloque : `codex_inbox` rend ce qui est arrivé et coûte presque rien. Codex, lui, ne peut pas reprendre un tour plus tard sans le perdre : c'est donc de ce côté que l'attente est faite, avec une échéance et un identifiant de repli. Une question qui expire n'est jamais perdue.
+
+**Attribution des runs.** Un superviseur peut piloter plusieurs runs simultanément. Chaque message porte le `job_id` du run qui l'a produit, et `codex_reply` renvoie la réponse au run qui a posé la question. Un `codex_tell` sans `job_id` est une diffusion : tous les runs le voient — ce qu'on veut précisément pour un « arrête tout ».
+
+**Le pont ne desserre pas le bac à sable.** Il s'attache par des surcharges `-c` portées par la ligne de commande du run, sans toucher à `$CODEX_HOME` ni à un autre run. Appeler un outil MCP depuis un run sous bac à sable demande normalement une approbation que personne n'est là pour donner ; le pont résout ça par `approvals_reviewer="auto_review"` plus une politique granulaire qui autorise **les seules** sollicitations MCP :
+
+```
+approval_policy={granular={mcp_elicitations=true,rules=false,sandbox_approval=false}}
+```
+
+Vérifié de bout en bout contre le vrai CLI : sous `-s read-only`, l'appel `ask_claude` aboutit et reçoit sa réponse, tandis que l'écriture d'un fichier est refusée (`writing is blocked by read-only sandbox`). L'élargissement du bac à sable aurait fonctionné aussi, et aurait été le mauvais choix.
 
 ## Sécurité
 

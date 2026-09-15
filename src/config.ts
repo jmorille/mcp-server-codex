@@ -8,8 +8,10 @@
  * different policy than the operator asked for.
  */
 
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { SandboxMode } from './codex/argv.ts';
 
@@ -30,6 +32,13 @@ export interface ServerConfig {
   defaultTimeoutMs: number;
   maxEvents: number;
   jobTtlMs: number;
+  /** Mailbox shared with every bridge process this server spawns. */
+  bridgeDir: string;
+  /** How long a Codex `ask_claude` call blocks before handing back a question id. */
+  bridgeTimeoutMs: number;
+  /** Executable Codex spawns for the bridge, and the script to hand it. */
+  bridgeCommand: string;
+  bridgeEntry: string;
 }
 
 export type Env = Record<string, string | undefined>;
@@ -97,10 +106,24 @@ function readRoots(value: string | undefined, cwd: string): string[] {
   return roots;
 }
 
+/**
+ * The bridge entry point that ships next to this file.
+ *
+ * `bridge/index.js` after a build; the `.ts` source when running straight from
+ * `src/`, which is how the tests and a development checkout run it.
+ */
+function defaultBridgeEntry(): string {
+  const built = fileURLToPath(new URL('./bridge/index.js', import.meta.url));
+  if (fs.existsSync(built)) return built;
+  return fileURLToPath(new URL('./bridge/index.ts', import.meta.url));
+}
+
 export function loadConfig(env: Env, cwd: string): ServerConfig {
+  const codexHome = env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex');
+
   return {
     binary: env.CODEX_BIN?.trim() || 'codex',
-    codexHome: env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex'),
+    codexHome,
     // An explicit allowlist is exhaustive: silently keeping the working
     // directory would defeat the point of naming the roots.
     allowedRoots: readRoots(env.CODEX_MCP_ALLOWED_ROOTS, cwd),
@@ -109,6 +132,15 @@ export function loadConfig(env: Env, cwd: string): ServerConfig {
     defaultTimeoutMs: readSeconds(env.CODEX_MCP_DEFAULT_TIMEOUT_SECONDS, 'CODEX_MCP_DEFAULT_TIMEOUT_SECONDS', 120_000),
     maxEvents: readPositiveInt(env.CODEX_MCP_MAX_EVENTS, 'CODEX_MCP_MAX_EVENTS', 2_000),
     jobTtlMs: readSeconds(env.CODEX_MCP_JOB_TTL_SECONDS, 'CODEX_MCP_JOB_TTL_SECONDS', 1_800_000),
+    // Under CODEX_HOME by default so it is disposable with the rest of the
+    // Codex state, and never inside a workspace where it would show up in a
+    // diff or be committed by the agent it is talking to.
+    bridgeDir: env.CODEX_MCP_BRIDGE_DIR?.trim() || path.join(codexHome, 'mcp-bridge'),
+    bridgeTimeoutMs: readSeconds(env.CODEX_MCP_BRIDGE_TIMEOUT_SECONDS, 'CODEX_MCP_BRIDGE_TIMEOUT_SECONDS', 90_000),
+    // The same Node that runs this server: whatever launched it is known to
+    // work, whereas a bare "node" on PATH may be a different major version.
+    bridgeCommand: env.CODEX_MCP_BRIDGE_COMMAND?.trim() || process.execPath,
+    bridgeEntry: env.CODEX_MCP_BRIDGE_ENTRY?.trim() || defaultBridgeEntry(),
   };
 }
 

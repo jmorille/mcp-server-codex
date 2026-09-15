@@ -141,3 +141,26 @@ export const jobLogsShape = {
 export const jobCancelShape = {
   job_id: z.string().min(1).describe('Job id to cancel. Sends SIGTERM, then SIGKILL after a grace period.'),
 };
+
+export const inboxShape = {
+  since: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('next_cursor from a previous call. Omit to read everything Codex has sent.'),
+  job_id: z.string().optional().describe('Only messages from this run. Omit to watch every run at once.'),
+};
+
+export const replyShape = {
+  message_id: z.string().min(1).describe('Id of the Codex message being answered, from codex_inbox.'),
+  text: z.string().min(1).describe('The answer. Codex is blocked waiting for it, so be direct.'),
+};
+
+export const tellShape = {
+  message: z.string().min(1).describe('What to tell Codex. It reads this at its next tool turn.'),
+  job_id: z
+    .string()
+    .optional()
+    .describe('Only tell this run. Omit to reach every run, which is what you want for "stop".'),
+};

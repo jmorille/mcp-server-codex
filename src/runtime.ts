@@ -9,6 +9,7 @@
  * transport, a real binary, or a process to shut down.
  */
 
+import { openMailbox } from './bridge/mailbox.ts';
 import { loadConfig } from './config.ts';
 import type { Env, ServerConfig } from './config.ts';
 import { createCodexRunner } from './codex/runner.ts';
@@ -37,6 +38,7 @@ export function createRuntime(env: Env, cwd: string): Runtime {
     runner: createCodexRunner({ binary: config.binary }),
     jobs,
     paths: createPathPolicy(config.allowedRoots),
+    bridge: openMailbox(config.bridgeDir),
   };
 
   const sweeper = setInterval(() => jobs.sweep(), SWEEP_INTERVAL_MS);

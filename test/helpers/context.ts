@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { openMailbox } from '../../src/bridge/mailbox.ts';
 import { loadConfig } from '../../src/config.ts';
 import type { Env } from '../../src/config.ts';
 import { createPathPolicy } from '../../src/security/paths.ts';
@@ -44,6 +45,7 @@ export function createTestContext(env: Env = {}): TestContext {
     runner,
     jobs: createJobStore({ maxEvents: config.maxEvents, ttlMs: config.jobTtlMs }),
     paths: createPathPolicy(config.allowedRoots),
+    bridge: openMailbox(config.bridgeDir),
     workspace,
     // A sibling of the workspace inside the system temp directory: absolute on
     // both platforms, and never a descendant of the single allowed root.

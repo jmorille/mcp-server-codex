@@ -1,7 +1,7 @@
 import { buildExecArgs } from '../codex/argv.ts';
 import { runHybrid } from '../jobs/hybrid.ts';
 import type { HybridOutcome } from '../jobs/hybrid.ts';
-import { resolveCommon } from './common.ts';
+import { bridgeArgsFor, resolveCommon } from './common.ts';
 import type { CommonToolInput } from './common.ts';
 import type { ToolContext } from './types.ts';
 
@@ -39,5 +39,6 @@ export async function execTool(context: ToolContext, input: ExecToolInput): Prom
     stdin: input.prompt,
     cwd: common.cwd,
     timeoutMs: common.timeoutMs,
+    argsForJob: bridgeArgsFor(context),
   });
 }

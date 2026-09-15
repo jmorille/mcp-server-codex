@@ -8,6 +8,7 @@
  * the design rather than a thing to remember per tool.
  */
 
+import { BRIDGE_THREAD_ENV, bridgeOverrides } from '../bridge/wiring.ts';
 import { assertBypassAllowed, assertSandboxAllowed } from '../config.ts';
 import type { SandboxMode } from '../codex/argv.ts';
 import type { HybridOutcome } from '../jobs/hybrid.ts';
@@ -36,6 +37,28 @@ export interface ResolvedCommon {
   timeoutMs: number;
   images: string[] | undefined;
   outputSchema: string | undefined;
+}
+
+/**
+ * The `-c` overrides that attach the bridge to one run.
+ *
+ * Handed to `runHybrid` rather than inlined into the argv because the bridge
+ * has to be told which run it serves, and that identity is the job id, which
+ * does not exist until the job is created. Applied by every run-style tool, so
+ * the bridge is a property of the server rather than something a caller can
+ * forget to ask for.
+ */
+export function bridgeArgsFor(context: ToolContext): (jobId: string) => string[] {
+  return (jobId) =>
+    bridgeOverrides({
+      mailboxDir: context.config.bridgeDir,
+      command: context.config.bridgeCommand,
+      args: [context.config.bridgeEntry],
+      env: {
+        [BRIDGE_THREAD_ENV]: jobId,
+        CODEX_BRIDGE_TIMEOUT_SECONDS: String(Math.round(context.config.bridgeTimeoutMs / 1_000)),
+      },
+    });
 }
 
 /**

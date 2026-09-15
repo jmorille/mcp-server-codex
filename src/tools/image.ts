@@ -26,7 +26,7 @@ import path from 'node:path';
 import { buildExecArgs } from '../codex/argv.ts';
 import { runHybrid } from '../jobs/hybrid.ts';
 import type { HybridOutcome } from '../jobs/hybrid.ts';
-import { resolveCommon } from './common.ts';
+import { bridgeArgsFor, resolveCommon } from './common.ts';
 import type { CommonToolInput } from './common.ts';
 import type { ToolContext } from './types.ts';
 
@@ -175,6 +175,7 @@ export async function generateImageTool(
     stdin: composedPrompt,
     cwd: path.dirname(outputPath),
     timeoutMs: common.timeoutMs,
+    argsForJob: bridgeArgsFor(context),
   });
 
   const base = { ...outcome, composedPrompt };
