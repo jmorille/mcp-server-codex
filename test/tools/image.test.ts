@@ -154,7 +154,7 @@ describe('codex_generate_image', () => {
   test('refuses a destination outside the allowlist', async () => {
     const c = fresh();
     await assert.rejects(
-      () => generateImageTool(c, { prompt: 'x', output_path: 'C:\\Windows\\evil.png' }),
+      () => generateImageTool(c, { prompt: 'x', output_path: path.join(c.outside, 'evil.png') }),
       PathViolationError,
     );
     assert.equal(c.runner.calls.length, 0);

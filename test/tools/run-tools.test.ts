@@ -73,23 +73,33 @@ describe('codex_exec', () => {
     assert.equal(c.runner.calls[0]!.cwd, c.workspace);
   });
 
+  test('the "outside" fixture really is absolute and outside, on every platform', () => {
+    // Regression guard. These tests used to hard-code "C:\\Windows", which
+    // path.isAbsolute() rejects on POSIX: the path was then resolved relative
+    // to the allowed root, landed inside it, and the rejection under test
+    // silently stopped happening on Linux while still passing on Windows.
+    const c = fresh();
+    assert.ok(path.isAbsolute(c.outside), `${c.outside} must be absolute here`);
+    assert.throws(() => c.paths.resolve(c.outside), PathViolationError);
+  });
+
   test('refuses a working directory outside the allowlist', async () => {
     const c = fresh();
-    await assert.rejects(() => execTool(c, { prompt: 'x', cwd: 'C:\\Windows' }), PathViolationError);
+    await assert.rejects(() => execTool(c, { prompt: 'x', cwd: c.outside }), PathViolationError);
     assert.equal(c.runner.calls.length, 0, 'nothing may be spawned once the path is refused');
   });
 
   test('refuses an extra writable directory outside the allowlist', async () => {
     const c = fresh();
     await assert.rejects(
-      () => execTool(c, { prompt: 'x', add_dir: ['/etc'] }),
+      () => execTool(c, { prompt: 'x', add_dir: [c.outside] }),
       PathViolationError,
     );
   });
 
   test('refuses an image attachment outside the allowlist', async () => {
     const c = fresh();
-    await assert.rejects(() => execTool(c, { prompt: 'x', images: ['/etc/passwd'] }), PathViolationError);
+    await assert.rejects(() => execTool(c, { prompt: 'x', images: [c.outside + '/ref.png'] }), PathViolationError);
   });
 
   test('blocks danger-full-access unless the server was unlocked', async () => {

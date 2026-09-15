@@ -14,6 +14,14 @@ export interface TestContext extends ToolContext {
   runner: StubRunner;
   /** A real directory inside the allowlist, for cwd and output paths. */
   workspace: string;
+  /**
+   * An absolute path that is outside the allowlist on every platform.
+   *
+   * Hard-coding a Windows path here would be a trap: `path.isAbsolute` returns
+   * false for `C:\Windows` on POSIX, so it would be resolved *relative to* the
+   * allowed root, land inside it, and the rejection under test would never fire.
+   */
+  outside: string;
   cleanup(): void;
 }
 
@@ -37,6 +45,9 @@ export function createTestContext(env: Env = {}): TestContext {
     jobs: createJobStore({ maxEvents: config.maxEvents, ttlMs: config.jobTtlMs }),
     paths: createPathPolicy(config.allowedRoots),
     workspace,
+    // A sibling of the workspace inside the system temp directory: absolute on
+    // both platforms, and never a descendant of the single allowed root.
+    outside: path.join(fs.realpathSync(os.tmpdir()), 'mcp-codex-outside-allowlist'),
     cleanup() {
       fs.rmSync(workspace, { recursive: true, force: true });
       fs.rmSync(codexHome, { recursive: true, force: true });
