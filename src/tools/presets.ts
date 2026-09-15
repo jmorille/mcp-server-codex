@@ -11,6 +11,7 @@
  */
 
 import type { ImagePreset } from '../images/presets.ts';
+import type { PresetChanges } from '../images/store.ts';
 import type { ToolContext } from './types.ts';
 
 export interface PresetSummary {
@@ -91,5 +92,46 @@ export async function presetSetTool(context: ToolContext, input: PresetSetInput)
   };
 
   context.presets.set(input.name, preset);
+  return list(context);
+}
+
+export interface PresetUpdateInput {
+  name: string;
+  subject?: string | null;
+  style?: string | null;
+  constraints?: string | null;
+  use_case?: string | null;
+  size?: string | null;
+  transparent?: boolean | null;
+  reference_images?: string[] | null;
+}
+
+/** Change some fields of a preset, leaving the others as they are. */
+export async function presetUpdateTool(context: ToolContext, input: PresetUpdateInput): Promise<PresetListResult> {
+  const changes: PresetChanges = {};
+
+  // Only the keys actually present become changes: `undefined` means "leave
+  // this alone", `null` means "clear it", and the two must not be conflated.
+  if ('subject' in input) changes.subject = input.subject;
+  if ('style' in input) changes.style = input.style;
+  if ('constraints' in input) changes.constraints = input.constraints;
+  if ('use_case' in input) changes.useCase = input.use_case;
+  if ('size' in input) changes.size = input.size;
+  if ('transparent' in input) changes.transparent = input.transparent;
+  const references = input.reference_images;
+  if (references !== undefined) {
+    // Resolved against the allowlist here, not only at use time: art stored in
+    // a preset and rejected later would fail on every image made from it, far
+    // from the call that introduced the problem.
+    changes.referenceImages = references === null ? null : references.map((r) => context.paths.resolve(r));
+  }
+
+  context.presets.update(input.name, changes);
+  return list(context);
+}
+
+/** Forget a preset entirely. */
+export async function presetDeleteTool(context: ToolContext, input: { name: string }): Promise<PresetListResult> {
+  context.presets.remove(input.name);
   return list(context);
 }

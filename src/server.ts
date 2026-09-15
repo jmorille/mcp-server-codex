@@ -24,7 +24,13 @@ import { applyTool } from './tools/apply.ts';
 import { generateImageTool } from './tools/image.ts';
 import { jobStatusTool, jobLogsTool, jobCancelTool } from './tools/jobs.ts';
 import { inboxTool, replyTool, tellTool } from './tools/bridge.ts';
-import { presetListTool, presetReloadTool, presetSetTool } from './tools/presets.ts';
+import {
+  presetDeleteTool,
+  presetListTool,
+  presetReloadTool,
+  presetSetTool,
+  presetUpdateTool,
+} from './tools/presets.ts';
 import type { ToolContext } from './tools/types.ts';
 import type { HybridOutcome } from './jobs/hybrid.ts';
 import {
@@ -37,9 +43,11 @@ import {
   jobLogsShape,
   jobStatusShape,
   listSessionsShape,
+  presetDeleteShape,
   presetListShape,
   presetReloadShape,
   presetSetShape,
+  presetUpdateShape,
   replyShape,
   resumeShape,
   reviewShape,
@@ -544,6 +552,41 @@ export function createServer(context: ToolContext): McpServer {
       const result = await presetSetTool(context, input);
       republishPresets();
       return ok(`Preset "${input.name}" saved. ${describePresets(result)}`, { ...result });
+    }),
+  );
+
+  server.registerTool(
+    'codex_preset_update',
+    {
+      title: 'Modify an image preset',
+      description:
+        'Change some fields of an existing preset and leave the rest alone. Use this rather than ' +
+        'codex_preset_set when adjusting one thing: restating a long subject just to tweak a style is ' +
+        'how a subject drifts. Pass null for a field to clear it. Fails if the preset does not exist.',
+      inputSchema: presetUpdateShape,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    (input) => guard(async () => {
+      const result = await presetUpdateTool(context, input);
+      republishPresets();
+      return ok(`Preset "${input.name}" updated. ${describePresets(result)}`, { ...result });
+    }),
+  );
+
+  server.registerTool(
+    'codex_preset_delete',
+    {
+      title: 'Delete an image preset',
+      description:
+        'Remove a preset from this instance and from its presets file. Fails if no preset of that name ' +
+        'exists, rather than reporting success for a name that was never there.',
+      inputSchema: presetDeleteShape,
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    (input) => guard(async () => {
+      const result = await presetDeleteTool(context, input);
+      republishPresets();
+      return ok(`Preset "${input.name}" deleted. ${describePresets(result)}`, { ...result });
     }),
   );
 

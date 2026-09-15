@@ -127,7 +127,9 @@ Les jobs vivent le temps de la session MCP.
 | `codex_tell` | Envoie à Codex un message qu'il n'a pas demandé — correction, changement de cap, arrêt. |
 | `codex_preset_list` | Détail complet des presets d'image de l'instance, et le fichier d'où ils viennent. |
 | `codex_preset_reload` | Relit le fichier de presets depuis le disque, sans redémarrage. |
-| `codex_preset_set` | Ajoute ou remplace un preset, en mémoire et dans le fichier. |
+| `codex_preset_set` | Définit ou remplace un preset, en mémoire et dans le fichier. |
+| `codex_preset_update` | Modifie certains champs d'un preset ; `null` efface un champ. |
+| `codex_preset_delete` | Supprime un preset de l'instance et du fichier. |
 
 Les outils d'exécution acceptent en commun : `cwd`, `model`, `sandbox`, `images`, `config`, `enable`, `disable`, `output_schema`, `worktree`, `ephemeral`, `skip_git_repo_check`, `timeout_seconds`.
 
@@ -185,7 +187,9 @@ Le fichier est lu au démarrage, mais il n'y est pas figé. Trois outils couvren
 {}                                                                     // codex_preset_list
 ```
 
-`codex_preset_set` écrit dans le fichier — un preset qui n'aurait vécu qu'en mémoire disparaîtrait au redémarrage sans que rien ne le dise — et remplace intégralement un preset de même nom, pour qu'un champ puisse être retiré. `codex_preset_reload` sert quand le fichier a été édité à la main.
+Les outils MCP sont le chemin normal, et **c'est ce qui garantit le format** : `use_case` est validé contre la taxonomie, `size` contre une dimension en pixels. Un `ui_mockup` au lieu de `ui-mockup` était auparavant accepté et partait tel quel dans le prompt, dégradant le rendu sans que rien ne le signale. La même validation vit dans le chargeur, donc une édition du fichier à la main ne contourne pas la garantie.
+
+`codex_preset_set` définit ou **remplace intégralement** — pour qu'un champ puisse être retiré. `codex_preset_update` change certains champs et laisse les autres, `null` effaçant un champ : c'est ce qu'on veut pour ajuster un style sans redire un long sujet, puisqu'un sujet redit est un sujet qui dérive. `codex_preset_delete` supprime, et échoue sur un nom inconnu plutôt que de faire passer une faute de frappe pour un nettoyage réussi. `codex_preset_reload` sert quand le fichier a été édité en dehors du serveur.
 
 Deux garanties tiennent des deux côtés :
 

@@ -47,6 +47,8 @@ const EXPECTED_TOOLS = [
   'codex_preset_list',
   'codex_preset_reload',
   'codex_preset_set',
+  'codex_preset_update',
+  'codex_preset_delete',
 ];
 
 describe('server identity', () => {
@@ -376,6 +378,43 @@ describe('managing presets at runtime', () => {
     const list = await client.callTool({ name: 'codex_preset_list', arguments: {} });
     const payload = (list as { structuredContent: { presets: { name: string }[] } }).structuredContent;
     assert.deepEqual(payload.presets.map((p) => p.name), ['good']);
+  });
+
+  test('stops advertising a preset once it is deleted', async () => {
+    // The mirror of re-advertising: an agent must not keep seeing a preset
+    // that would now fail.
+    const { client } = await withPresetFile({ mascot: { subject: 's' }, packshot: { subject: 's' } });
+    assert.match(await imageDescription(client), /mascot/);
+
+    await client.callTool({ name: 'codex_preset_delete', arguments: { name: 'mascot' } });
+
+    const description = await imageDescription(client);
+    assert.doesNotMatch(description, /mascot/);
+    assert.match(description, /packshot/);
+  });
+
+  test('modifies one field without disturbing the others', async () => {
+    const { client } = await withPresetFile({ mascot: { subject: 'a long description', style: 'old' } });
+
+    await client.callTool({ name: 'codex_preset_update', arguments: { name: 'mascot', style: 'new' } });
+
+    const list = await client.callTool({ name: 'codex_preset_list', arguments: {} });
+    const preset = (list as { structuredContent: { presets: { subject: string; style: string }[] } })
+      .structuredContent.presets[0];
+    assert.equal(preset?.style, 'new');
+    assert.equal(preset?.subject, 'a long description');
+  });
+
+  test('refuses a use_case outside the taxonomy', async () => {
+    // The tools are the guarantee: a near-miss slug must not reach the prompt.
+    const { client } = await withPresetFile({});
+
+    const result = await client.callTool({
+      name: 'codex_preset_set',
+      arguments: { name: 'mascot', subject: 's', use_case: 'ui_mockup' },
+    });
+
+    assert.equal((result as { isError?: boolean }).isError, true);
   });
 
   test('tells an unconfigured instance where presets come from', async () => {

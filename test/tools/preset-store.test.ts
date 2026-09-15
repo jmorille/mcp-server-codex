@@ -170,3 +170,115 @@ describe('a store with no file', () => {
     assert.deepEqual(open(false).all(), {});
   });
 });
+
+describe('modifying a preset', () => {
+  test('changes one field and leaves the rest alone', () => {
+    // A full replace would force the caller to restate a long subject just to
+    // tweak the style, and a restated subject is a subject that drifts.
+    write({ mascot: { subject: 'a long careful description', style: 'old' } });
+    const store = open();
+
+    store.update('mascot', { style: 'new' });
+
+    assert.equal(store.all().mascot?.style, 'new');
+    assert.equal(store.all().mascot?.subject, 'a long careful description');
+  });
+
+  test('persists the change', () => {
+    write({ mascot: { subject: 's', style: 'old' } });
+    open().update('mascot', { style: 'new' });
+
+    assert.equal(createPresetStore(file).all().mascot?.style, 'new');
+  });
+
+  test('clears a field when asked explicitly', () => {
+    write({ mascot: { subject: 's', style: 'unwanted' } });
+    const store = open();
+
+    store.update('mascot', { style: null });
+
+    assert.equal(store.all().mascot?.style, undefined);
+    assert.equal(store.all().mascot?.subject, 's');
+  });
+
+  test('refuses to modify a preset that does not exist, naming the ones that do', () => {
+    write({ mascot: {} });
+
+    assert.throws(() => open().update('nope', { style: 'x' }), /nope.*mascot|mascot.*nope/s);
+  });
+
+  test('refuses a change that would leave the preset empty', () => {
+    write({ mascot: { subject: 's' } });
+
+    assert.throws(() => open().update('mascot', { subject: null }), /empty|at least/i);
+  });
+});
+
+describe('deleting a preset', () => {
+  test('removes it from memory and from the file', () => {
+    write({ a: { subject: 'x' }, b: { subject: 'y' } });
+    const store = open();
+
+    store.remove('a');
+
+    assert.deepEqual(Object.keys(store.all()), ['b']);
+    assert.deepEqual(Object.keys(createPresetStore(file).all()), ['b']);
+  });
+
+  test('refuses an unknown name rather than pretending it worked', () => {
+    // Silently succeeding would let a typo look like a successful cleanup.
+    write({ a: {} });
+
+    assert.throws(() => open().remove('b'), /b/);
+  });
+
+  test('says where presets come from on an unconfigured instance', () => {
+    assert.throws(() => open(false).remove('a'), /CODEX_MCP_IMAGE_PRESETS/);
+  });
+});
+
+describe('the format is guaranteed wherever a preset comes from', () => {
+  test('rejects a use_case outside the taxonomy, in the file', () => {
+    // The tools validate, but so must the loader: otherwise editing the file
+    // by hand bypasses the guarantee the tools exist to provide.
+    write({ mascot: { use_case: 'ui_mockup' } });
+
+    assert.throws(() => open(), /use_case|ui_mockup/);
+  });
+
+  test('accepts every slug the taxonomy documents', () => {
+    for (const slug of [
+      'product-mockup',
+      'ui-mockup',
+      'logo-brand',
+      'illustration-story',
+      'infographic-diagram',
+      'photorealistic-natural',
+      'stylized-concept',
+      'ads-marketing',
+    ]) {
+      write({ mascot: { use_case: slug } });
+      assert.equal(open().all().mascot?.useCase, slug, `${slug} must be accepted`);
+    }
+  });
+
+  test('rejects a size that is not a pixel dimension', () => {
+    write({ mascot: { size: 'big' } });
+
+    assert.throws(() => open(), /size/);
+  });
+
+  test('accepts a pixel dimension', () => {
+    write({ mascot: { size: '1536x1024' } });
+
+    assert.equal(open().all().mascot?.size, '1536x1024');
+  });
+
+  test('rejects a bad use_case coming through set, before writing anything', () => {
+    write({ good: { subject: 'intact' } });
+    const store = open();
+
+    assert.throws(() => store.set('bad', { useCase: 'nonsense' }), /use_case|nonsense/);
+    assert.deepEqual(Object.keys(createPresetStore(file).all()), ['good']);
+  });
+});

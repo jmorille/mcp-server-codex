@@ -8,6 +8,24 @@
 
 import { z } from 'zod';
 
+import { USE_CASES } from './images/presets.ts';
+
+/**
+ * Validated, not merely documented.
+ *
+ * A near-miss like "ui_mockup" for "ui-mockup" used to pass straight into the
+ * composed prompt and quietly degrade the rendering. The same check runs in the
+ * preset loader, so hand-editing the file cannot bypass it either.
+ */
+const useCaseSchema = z
+  .enum(USE_CASES)
+  .describe('Taxonomy slug steering the style. One of: ' + USE_CASES.join(', ') + '.');
+
+const sizeSchema = z
+  .string()
+  .regex(/^\d{2,5}x\d{2,5}$/, 'size must be a pixel dimension such as "1024x1024".')
+  .describe('Requested size as WIDTHxHEIGHT, e.g. "1024x1024", "1536x1024", "3840x2160".');
+
 export const sandboxSchema = z
   .enum(['read-only', 'workspace-write', 'danger-full-access'])
   .describe(
@@ -120,14 +138,8 @@ export const generateImageShape = {
     .string()
     .min(1)
     .describe('Where to write the image, e.g. "assets/hero.png". Must sit inside the server allowlist.'),
-  use_case: z
-    .string()
-    .optional()
-    .describe(
-      'Taxonomy slug steering the style: product-mockup, ui-mockup, logo-brand, illustration-story, ' +
-        'infographic-diagram, photorealistic-natural, stylized-concept, ads-marketing.',
-    ),
-  size: z.string().optional().describe('Requested size, e.g. "1024x1024", "1536x1024", "3840x2160".'),
+  use_case: useCaseSchema.optional(),
+  size: sizeSchema.optional(),
   transparent: z.boolean().optional().describe('Ask for a genuinely transparent background and preserve the alpha channel.'),
   style: z.string().optional().describe('Style or medium, e.g. "flat minimal vector", "studio product photography".'),
   constraints: z.string().optional().describe('Things the image must avoid or preserve, e.g. "no text, no watermark".'),
@@ -191,11 +203,29 @@ export const presetSetShape = {
     .describe('The recurring subject, prepended to every prompt using this preset. This is the field that earns a preset.'),
   style: z.string().optional().describe('Style or medium, e.g. "pixel art 16-bit, limited palette".'),
   constraints: z.string().optional().describe('What images from this preset must avoid, e.g. "no watermark".'),
-  use_case: z.string().optional().describe('Taxonomy slug steering the rendering, e.g. "stylized-concept".'),
-  size: z.string().optional().describe('Default size, e.g. "1024x1024".'),
+  use_case: useCaseSchema.optional(),
+  size: sizeSchema.optional(),
   transparent: z.boolean().optional().describe('Ask for a transparent background by default.'),
   reference_images: z
     .array(z.string())
     .optional()
     .describe('Reference art for this subject. Each must sit inside the server allowlist.'),
+};
+
+/** `null` clears a field; omitting it leaves that field as it is. */
+const clearable = <T extends z.ZodTypeAny>(schema: T) => schema.nullable().optional();
+
+export const presetUpdateShape = {
+  name: z.string().min(1).describe('Preset to modify. It must already exist; use codex_preset_set to define one.'),
+  subject: clearable(z.string()).describe('New subject. Pass null to clear it.'),
+  style: clearable(z.string()).describe('New style. Pass null to clear it.'),
+  constraints: clearable(z.string()).describe('New constraints. Pass null to clear them.'),
+  use_case: clearable(useCaseSchema).describe('New use case. Pass null to clear it.'),
+  size: clearable(sizeSchema).describe('New default size. Pass null to clear it.'),
+  transparent: clearable(z.boolean()).describe('New transparency default. Pass null to clear it.'),
+  reference_images: clearable(z.array(z.string())).describe('New reference art. Pass null to clear it.'),
+};
+
+export const presetDeleteShape = {
+  name: z.string().min(1).describe('Preset to delete. Fails if no preset of that name exists.'),
 };

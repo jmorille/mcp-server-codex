@@ -31,6 +31,24 @@ export interface PresetStore {
   reload(): { count: number; names: string[] };
   /** Add or replace one preset, in memory and on disk. */
   set(name: string, preset: ImagePreset): void;
+  /**
+   * Change some fields of an existing preset, leaving the others alone.
+   *
+   * `null` clears a field. Distinct from `set` because restating a long
+   * subject just to tweak a style is how a subject drifts.
+   */
+  update(name: string, changes: PresetChanges): void;
+  /** Forget one preset, in memory and on disk. */
+  remove(name: string): void;
+  /**
+   * Change some fields of an existing preset, leaving the others alone.
+   *
+   * `null` clears a field. Distinct from `set` because restating a long
+   * subject just to tweak a style is how a subject drifts.
+   */
+  update(name: string, changes: PresetChanges): void;
+  /** Forget one preset, in memory and on disk. */
+  remove(name: string): void;
   /** The file backing this store, when the instance was given one. */
   readonly file: string | undefined;
 }
@@ -76,6 +94,11 @@ function readFileShape(file: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+/** A partial change; `null` means "clear this field". */
+export type PresetChanges = {
+  [K in keyof ImagePreset]?: ImagePreset[K] | null;
+};
+
 export function createPresetStore(file: string | undefined): PresetStore {
   let presets = loadImagePresets(file);
 
@@ -97,35 +120,89 @@ export function createPresetStore(file: string | undefined): PresetStore {
       const names = Object.keys(next);
       return { count: names.length, names };
     },
-
     set(name: string, preset: ImagePreset): void {
-      if (name.trim() === '') {
-        throw new ConfigError('A preset needs a name.');
-      }
+      requireName(name);
+      commit((onDisk) => ({ ...onDisk, [name]: requireNonEmpty(name, toFileShape(preset)) }));
+    },
 
-      const entry = toFileShape(preset);
-      if (Object.keys(entry).length === 0) {
+    update(name: string, changes: PresetChanges): void {
+      requireName(name);
+
+      const existing = presets[name];
+      if (existing === undefined) {
+        const known = Object.keys(presets);
         throw new ConfigError(
-          `Preset "${name}" is empty. Give it at least a subject, a style or a reference image — ` +
-            'an empty preset would change nothing about the images it is used for.',
+          `No preset "${name}" to modify.` +
+            (known.length === 0
+              ? ' This instance has none yet; use codex_preset_set to define one.'
+              : ` This instance knows: ${known.join(', ')}.`),
         );
       }
 
-      const target = requireFile(file);
-      const onDisk = readFileShape(target);
+      // Applied to the internal shape and serialised once, so a cleared field
+      // disappears from the file rather than being written as null.
+      const merged: ImagePreset = { ...existing };
+      for (const [key, value] of Object.entries(changes)) {
+        if (value === null) delete merged[key as keyof ImagePreset];
+        else if (value !== undefined) Reflect.set(merged, key, value);
+      }
 
-      // Validated as a whole before anything is written, so a rejected preset
-      // leaves both the file and the live set exactly as they were.
-      const merged = { ...onDisk, [name]: entry };
-      const validated = parseImagePresets(merged, target);
+      commit((onDisk) => ({ ...onDisk, [name]: requireNonEmpty(name, toFileShape(merged)) }));
+    },
 
-      // Atomic, like the mailbox: a reader — or a restart — must never catch
-      // this file half written.
-      const temporary = `${target}.tmp`;
-      fs.writeFileSync(temporary, `${JSON.stringify(merged, null, 2)}\n`);
-      fs.renameSync(temporary, target);
+    remove(name: string): void {
+      requireFile(file);
 
-      presets = validated;
+      // Refused rather than silently successful: a typo that looks like a
+      // completed cleanup is worse than an error.
+      if (presets[name] === undefined) {
+        throw new ConfigError(
+          `No preset "${name}" to delete. This instance knows: ${Object.keys(presets).join(', ') || 'none'}.`,
+        );
+      }
+
+      commit((onDisk) => {
+        const next = { ...onDisk };
+        delete next[name];
+        return next;
+      });
     },
   };
+
+  /**
+   * Validate the whole candidate set, then write it atomically.
+   *
+   * The order is the point: nothing is replaced and nothing is written until
+   * the result is known to be valid, so a rejected change leaves both the file
+   * and the live set exactly as they were.
+   */
+  function commit(change: (onDisk: Record<string, unknown>) => Record<string, unknown>): void {
+    const target = requireFile(file);
+    const next = change(readFileShape(target));
+    const validated = parseImagePresets(next, target);
+
+    // Temp file then rename, like the mailbox: a reader — or a restart — must
+    // never catch this file half written.
+    const temporary = `${target}.tmp`;
+    fs.writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`);
+    fs.renameSync(temporary, target);
+
+    presets = validated;
+  }
+}
+
+function requireName(name: string): void {
+  if (name.trim() === '') {
+    throw new ConfigError('A preset needs a name.');
+  }
+}
+
+function requireNonEmpty(name: string, entry: Record<string, unknown>): Record<string, unknown> {
+  if (Object.keys(entry).length === 0) {
+    throw new ConfigError(
+      `Preset "${name}" would be empty. Give it at least a subject, a style or a reference image — ` +
+        'an empty preset would change nothing about the images it is used for.',
+    );
+  }
+  return entry;
 }

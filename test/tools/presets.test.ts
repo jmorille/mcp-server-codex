@@ -95,7 +95,7 @@ describe('loading image presets', () => {
         subject: 's',
         style: 'st',
         constraints: 'c',
-        use_case: 'u',
+        use_case: 'logo-brand',
         size: '1024x1024',
         transparent: true,
       },

@@ -43,6 +43,27 @@ const FIELDS = new Set([
   'reference_images',
 ]);
 
+/**
+ * The taxonomy the `imagegen` skill steers on.
+ *
+ * Validated rather than documented, because a near-miss is the expensive
+ * failure here: `ui_mockup` for `ui-mockup` passes straight into the composed
+ * prompt and quietly degrades the rendering, with nothing anywhere saying why.
+ */
+export const USE_CASES = [
+  'product-mockup',
+  'ui-mockup',
+  'logo-brand',
+  'illustration-story',
+  'infographic-diagram',
+  'photorealistic-natural',
+  'stylized-concept',
+  'ads-marketing',
+] as const;
+
+/** Width by height in pixels; every documented size has this shape. */
+const SIZE_PATTERN = /^\d{2,5}x\d{2,5}$/;
+
 function asString(value: unknown, field: string, name: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'string') {
@@ -119,12 +140,24 @@ export function parseImagePresets(parsed: unknown, file: string): ImagePresets {
       throw new ConfigError(`Preset "${name}": transparent must be true or false.`);
     }
 
+    const useCase = asString(entry.use_case, 'use_case', name);
+    if (useCase !== undefined && !(USE_CASES as readonly string[]).includes(useCase)) {
+      throw new ConfigError(
+        `Preset "${name}": use_case "${useCase}" is not one of ${USE_CASES.join(', ')}.`,
+      );
+    }
+
+    const size = asString(entry.size, 'size', name);
+    if (size !== undefined && !SIZE_PATTERN.test(size)) {
+      throw new ConfigError(`Preset "${name}": size "${size}" must be a pixel dimension such as "1024x1024".`);
+    }
+
     presets[name] = {
       subject: asString(entry.subject, 'subject', name),
       style: asString(entry.style, 'style', name),
       constraints: asString(entry.constraints, 'constraints', name),
-      useCase: asString(entry.use_case, 'use_case', name),
-      size: asString(entry.size, 'size', name),
+      useCase,
+      size,
       transparent: entry.transparent as boolean | undefined,
       referenceImages: (references as string[] | undefined)?.map((reference) => {
         if (typeof reference !== 'string') {
