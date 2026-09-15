@@ -171,6 +171,25 @@ export async function generateImageTool(
   const preset = input.preset !== undefined ? presetFor(context, input.preset) : {};
 
   const outputPath = context.paths.resolve(input.output_path);
+
+  // The destination directory, validated in its own right. Deriving it with
+  // `dirname` from a validated path is NOT the same thing: when output_path is
+  // an allowed root, its parent sits one level outside the allowlist, and the
+  // run — forced to workspace-write below — would have had that parent as its
+  // workspace. Re-resolving closes that, and creating it up front also fixes
+  // the plain ENOENT on the documented "assets/hero.png" example.
+  //
+  // Named first, because otherwise the allowlist rejects the *parent* and the
+  // message talks about a directory the caller never mentioned.
+  if (fs.existsSync(outputPath) && fs.statSync(outputPath).isDirectory()) {
+    throw new Error(
+      `output_path "${input.output_path}" is a directory. Give the full path of the file to write, ` +
+        'e.g. "assets/hero.png".',
+    );
+  }
+
+  const outputDir = context.paths.resolve(path.dirname(outputPath));
+  await fsp.mkdir(outputDir, { recursive: true });
   // Preset references go through the allowlist like any other path: being
   // configuration does not make them exempt.
   const references = input.reference_images ?? preset.referenceImages;
@@ -210,7 +229,7 @@ export async function generateImageTool(
     tool: 'codex_generate_image',
     args,
     stdin: composedPrompt,
-    cwd: path.dirname(outputPath),
+    cwd: outputDir,
     timeoutMs: common.timeoutMs,
     argsForJob: bridgeArgsFor(context),
   });

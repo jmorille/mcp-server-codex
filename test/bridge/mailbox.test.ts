@@ -84,26 +84,29 @@ describe('reading', () => {
     );
   });
 
-  test('returns only what is new since a cursor', () => {
+  test('hands each message over once and only once', () => {
     box.post({ from: 'claude', kind: 'note', text: 'old' });
-    const first = box.read({ audience: 'codex' });
+    box.read({ audience: 'codex' });
     box.post({ from: 'claude', kind: 'note', text: 'new' });
 
-    const second = box.read({ audience: 'codex', since: first.nextCursor });
     assert.deepEqual(
-      second.messages.map((m) => m.text),
+      box.read({ audience: 'codex' }).messages.map((m) => m.text),
       ['new'],
     );
   });
 
-  test('advances the cursor past messages addressed to the other side', () => {
+  test('consuming one side does not consume the other', () => {
+    // Both sides share one directory. Reading as Codex must not mark Claude's
+    // own backlog as delivered, or the other reader would never see it.
     box.post({ from: 'claude', kind: 'note', text: 'for codex' });
     box.post({ from: 'codex', kind: 'note', text: 'for claude' });
 
-    // Both sides share one sequence; a cursor must not rewind because the last
-    // message was not for this reader.
-    const page = box.read({ audience: 'codex' });
-    assert.equal(page.nextCursor, 2);
+    box.read({ audience: 'codex' });
+
+    assert.deepEqual(
+      box.read({ audience: 'claude' }).messages.map((m) => m.text),
+      ['for claude'],
+    );
   });
 
   test('is empty on a mailbox nobody has written to', () => {
@@ -213,11 +216,67 @@ describe('telling runs apart', () => {
     );
   });
 
-  test('advances a filtered cursor past the runs it skipped', () => {
+  test('reading one run leaves another run still deliverable', () => {
+    // Watching job-7 must not silently swallow job-9's traffic: a per-run read
+    // that consumed everything would lose the other run's messages for good.
     box.post({ from: 'codex', kind: 'note', text: 'from seven', thread: 'job-7' });
     box.post({ from: 'codex', kind: 'note', text: 'from nine', thread: 'job-9' });
 
-    // Same shared sequence: a per-run reader must not rewind and re-deliver.
-    assert.equal(box.read({ audience: 'claude', thread: 'job-7' }).nextCursor, 2);
+    box.read({ audience: 'claude', thread: 'job-7' });
+
+    assert.deepEqual(
+      box.read({ audience: 'claude', thread: 'job-9' }).messages.map((m) => m.text),
+      ['from nine'],
+    );
+  });
+});
+
+describe('the cursor survives two processes writing at once', () => {
+  test('never skips a message posted by the other process in the same millisecond', () => {
+    // The file name carried a per-process counter, but two processes share the
+    // directory: the bridge (counter at 1) sorted BEFORE a long-lived server
+    // (counter at 13), so a question landed behind a cursor already past it and
+    // was never delivered. Codex then blocked for its whole timeout.
+    const other = openMailbox(dir);
+    for (let i = 0; i < 12; i += 1) box.post({ from: 'claude', kind: 'note', text: `old ${i}` });
+
+    const realNow = Date.now;
+    Date.now = () => 1_789_500_000_000;
+    try {
+      box.post({ from: 'claude', kind: 'note', text: 'from claude' });
+      const first = box.read({ audience: 'claude' });
+      other.post({ from: 'codex', kind: 'question', text: 'from codex' });
+      const second = box.read({ audience: 'claude', since: first.nextCursor });
+
+      assert.deepEqual(
+        second.messages.map((m) => m.text),
+        ['from codex'],
+        'a message written by the other process must not fall behind the cursor',
+      );
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test('still delivers each message exactly once across many interleaved reads', () => {
+    const other = openMailbox(dir);
+    const realNow = Date.now;
+    Date.now = () => 1_789_500_000_000;
+
+    const seen: string[] = [];
+    let cursor;
+    try {
+      for (let i = 0; i < 20; i += 1) {
+        (i % 2 === 0 ? box : other).post({ from: 'codex', kind: 'note', text: `m${i}` });
+        const page = box.read({ audience: 'claude', since: cursor });
+        seen.push(...page.messages.map((m) => m.text));
+        cursor = page.nextCursor;
+      }
+    } finally {
+      Date.now = realNow;
+    }
+
+    assert.equal(new Set(seen).size, 20, 'every message must be delivered');
+    assert.equal(seen.length, 20, 'and none of them twice');
   });
 });

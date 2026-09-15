@@ -169,12 +169,6 @@ export const jobCancelShape = {
 };
 
 export const inboxShape = {
-  since: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe('next_cursor from a previous call. Omit to read everything Codex has sent.'),
   job_id: z.string().optional().describe('Only messages from this run. Omit to watch every run at once.'),
 };
 

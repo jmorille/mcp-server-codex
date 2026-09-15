@@ -162,17 +162,17 @@ export function createBridgeServer(options: BridgeServerOptions): McpServer {
       title: 'Check for messages from Claude',
       description:
         'Read anything the supervising Claude agent has sent since the last check, including messages it ' +
-        'sent unprompted — a correction, a change of direction, a stop. Pass question_id to also collect ' +
+        'sent unprompted — a correction, a change of direction, a stop. Each message is handed over once, ' +
+        'so no cursor is needed. Pass question_id to also collect ' +
         'the answer to an earlier ask_claude that timed out. Cheap and non-blocking; worth calling between ' +
         'steps of a long task.',
       inputSchema: {
-        since: z.number().int().min(0).optional().describe('next_cursor from a previous call. Omit to read from the start.'),
         question_id: z.string().optional().describe('Also report whether this earlier question has been answered.'),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    ({ since, question_id }) => {
-      const page = box.read({ audience: 'codex', since, thread: options.thread });
+    ({ question_id }) => {
+      const page = box.read({ audience: 'codex', thread: options.thread });
       const payload: Record<string, unknown> = {
         messages: page.messages.map(messagePayload),
         next_cursor: page.nextCursor,
@@ -182,7 +182,9 @@ export function createBridgeServer(options: BridgeServerOptions): McpServer {
       if (question_id !== undefined) {
         // Not restricted to the page: an answer posted before `since` is still
         // the answer, and losing it to a cursor would strand the question.
-        const everything = box.read({ audience: 'codex', thread: options.thread }).messages;
+        // peek, not read: looking for an answer must not consume the backlog
+        // that the next check_claude is supposed to deliver.
+        const everything = box.peek({ audience: 'codex', thread: options.thread });
         const answer = everything.find((m) => m.in_reply_to === question_id);
         payload.question_id = question_id;
         payload.answered = answer !== undefined;

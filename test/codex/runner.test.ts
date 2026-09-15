@@ -171,3 +171,17 @@ describe('version probe', () => {
     assert.equal(await createCodexRunner({ binary: 'definitely-not-a-real-binary-xyz' }).version(), null);
   });
 });
+
+describe('decoding the stream', () => {
+  test('keeps accented text intact when a character is split across chunks', async () => {
+    // Buffers were decoded one chunk at a time, so a character straddling a
+    // pipe boundary became two replacement characters. The JSON stayed valid,
+    // nothing landed in unparsedLines, and the damage was invisible — in French
+    // it hit nearly every long output.
+    const result = await runner().run({ args: ['--split-utf8'], stdin: '' });
+
+    const text = result.summary.messages.join('');
+    assert.ok(!text.includes('�'), `no replacement characters, got: ${text}`);
+    assert.match(text, /héllo — çà va ✓/);
+  });
+});

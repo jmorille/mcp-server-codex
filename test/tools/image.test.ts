@@ -173,3 +173,37 @@ describe('codex_generate_image', () => {
     c.runner.settle();
   });
 });
+
+describe('the image tool stays inside the allowlist', () => {
+  test('never runs above an allowed root when output_path is the root itself', async () => {
+    // `dirname` of a validated path is not a validated path: output_path on the
+    // root resolved to its parent, one level OUTSIDE the allowlist, and the run
+    // was then forced to workspace-write. The prompt is free text, so the run
+    // was not limited to drawing. Refused now, and refused before any process
+    // exists.
+    const c = createTestContext();
+
+    await assert.rejects(
+      () => generateImageTool(c, { prompt: 'x', output_path: c.workspace }),
+      /directory/i,
+    );
+    assert.equal(c.runner.calls.length, 0, 'nothing may be spawned for a refused call');
+    c.cleanup();
+  });
+
+  test('creates the output directory instead of failing on a path that does not exist', async () => {
+    // The documented example is "assets/hero.png"; on a repository without an
+    // assets/ directory the spawn died with an opaque ENOENT before Codex ever
+    // started.
+    const c = createTestContext();
+    const call = generateImageTool(c, { prompt: 'x', output_path: 'assets/nested/hero.png' });
+    await c.runner.started();
+    const cwd = c.runner.calls.at(-1)?.cwd ?? '';
+    c.runner.settle();
+    await call;
+
+    assert.ok(fs.existsSync(path.join(c.workspace, 'assets', 'nested')), 'the destination must exist before the run');
+    assert.ok(fs.existsSync(cwd), `the working directory must exist, got ${cwd}`);
+    c.cleanup();
+  });
+});

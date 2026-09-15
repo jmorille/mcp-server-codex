@@ -16,7 +16,6 @@ import type { Message } from '../bridge/mailbox.ts';
 import type { ToolContext } from './types.ts';
 
 export interface InboxToolInput {
-  since?: number;
   job_id?: string;
 }
 
@@ -51,14 +50,14 @@ export interface InboxResult {
 
 /** Read what Codex has sent since the last call. */
 export async function inboxTool(context: ToolContext, input: InboxToolInput): Promise<InboxResult> {
-  const page = context.bridge.read({ audience: 'claude', since: input.since, thread: input.job_id });
+  const page = context.bridge.read({ audience: 'claude', thread: input.job_id });
 
-  // Answers live outside the page — one posted before the cursor still answers
-  // a question inside it — so the whole box is scanned for replies.
+  // Peeked, not read: marking the other side's traffic as delivered here would
+  // consume it from under the reader it belongs to.
   const answered = new Set(
     context.bridge
-      .read({ audience: 'codex' })
-      .messages.map((message) => message.in_reply_to)
+      .peek({ audience: 'codex' })
+      .map((message) => message.in_reply_to)
       .filter((id): id is string => id !== null),
   );
 
@@ -83,8 +82,8 @@ export async function inboxTool(context: ToolContext, input: InboxToolInput): Pr
 /** Answer a question Codex is waiting on. */
 export async function replyTool(context: ToolContext, input: ReplyToolInput): Promise<{ message_id: string; in_reply_to: string; job_id: string | null }> {
   const question = context.bridge
-    .read({ audience: 'claude' })
-    .messages.find((message) => message.id === input.message_id);
+    .peek({ audience: 'claude' })
+    .find((message) => message.id === input.message_id);
 
   // Posting an answer to an id nobody asked about would succeed silently and
   // leave the real question hanging until it times out.

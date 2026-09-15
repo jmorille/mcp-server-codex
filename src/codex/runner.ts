@@ -14,6 +14,8 @@
  *   Codex run that is mid-tool-call does not always honour the polite signal.
  */
 
+import { StringDecoder } from 'node:string_decoder';
+
 import { execa } from 'execa';
 import type { ResultPromise } from 'execa';
 
@@ -104,9 +106,22 @@ export function createCodexRunner(options: CodexRunnerOptions): CodexRunner {
         for (const event of accumulator.ingest(chunk)) request.onEvent?.(event);
       };
 
-      subprocess.stdout?.on('data', (chunk: unknown) => emit(String(chunk)));
-      subprocess.stderr?.on('data', (chunk: unknown) => {
-        stderr += String(chunk);
+      // One decoder per stream, kept across chunks.
+      //
+      // Despite `encoding: 'utf8'`, `buffer: false` delivers Buffers, and
+      // decoding each one on its own splits any character that straddles a pipe
+      // boundary into two replacement characters. The JSON stayed valid and
+      // nothing landed in unparsedLines, so the damage was invisible — and in
+      // French it hit nearly every long output. A StringDecoder holds the
+      // trailing bytes of an incomplete character until the next chunk.
+      const outDecoder = new StringDecoder('utf8');
+      const errDecoder = new StringDecoder('utf8');
+
+      subprocess.stdout?.on('data', (chunk: Buffer | string) => {
+        emit(typeof chunk === 'string' ? chunk : outDecoder.write(chunk));
+      });
+      subprocess.stderr?.on('data', (chunk: Buffer | string) => {
+        stderr += typeof chunk === 'string' ? chunk : errDecoder.write(chunk);
       });
 
       let forceKillTimer: NodeJS.Timeout | undefined;

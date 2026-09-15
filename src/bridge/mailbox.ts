@@ -30,18 +30,31 @@ export interface Message {
 
 export interface ReadPage {
   messages: Message[];
-  /** Absolute cursor to pass back as `since`; counts every message, not just the readable ones. */
+  /**
+   * How many messages this reader has been handed so far.
+   *
+   * Informational, not a position to read from. It used to be an index into the
+   * sorted listing, which two processes cannot agree on: the bridge's own
+   * counter restarts at 1 while a long-lived server's is well past it, so a
+   * message written in the same millisecond sorted *before* a cursor already
+   * past it and was never delivered.
+   */
   nextCursor: number;
 }
 
 export interface Mailbox {
   post(input: { from: Party; kind: MessageKind; text: string; inReplyTo?: string; thread?: string }): Message;
   /**
-   * `audience` is the reader: it sees what the *other* party wrote. `thread`
+   * Everything addressed to `audience` that this handle has not handed over yet.
+   *
+   * Delivery is tracked by message id rather than by position, so it does not
+   * depend on two processes agreeing on an order they cannot agree on. `thread`
    * narrows to one Codex run, plus anything addressed to no run in particular;
    * omit it to watch every run at once.
    */
-  read(options: { audience: Party; since?: number; thread?: string }): ReadPage;
+  read(options: { audience: Party; thread?: string }): ReadPage;
+  /** Look at the mailbox without consuming anything. */
+  peek(options: { audience: Party; thread?: string }): Message[];
   /** Poll until a reply to `to` appears, or the timeout elapses. */
   waitForReply(options: { to: string; timeoutMs: number; pollMs?: number }): Promise<Message | null>;
   readonly dir: string;
@@ -76,6 +89,14 @@ function isMessage(value: unknown): value is Message {
 
 export function openMailbox(dir: string): Mailbox {
   let counter = 0;
+  /**
+   * What each side has already been handed, by message id.
+   *
+   * In memory, and deliberately so: it is the reader's own bookkeeping, and a
+   * fresh process — a new Codex run, a restarted server — should see the
+   * backlog rather than inherit someone else's idea of what was read.
+   */
+  const delivered: Record<Party, Set<string>> = { claude: new Set(), codex: new Set() };
 
   function listFiles(): string[] {
     try {
@@ -103,6 +124,17 @@ export function openMailbox(dir: string): Mailbox {
       if (isMessage(parsed)) messages.push({ ...parsed, thread: parsed.thread ?? null });
     }
     return messages;
+  }
+
+  /** What this audience is allowed to see, consumed or not. */
+  function visible(all: Message[], options: { audience: Party; thread?: string }): Message[] {
+    return all
+      .filter((message) => message.from !== options.audience)
+      // A message with no thread is addressed to everyone: filtering it out
+      // would make a broadcast reach nobody.
+      .filter(
+        (message) => options.thread === undefined || message.thread === null || message.thread === options.thread,
+      );
   }
 
   return {
@@ -137,23 +169,16 @@ export function openMailbox(dir: string): Mailbox {
     },
 
     read(options): ReadPage {
-      const all = loadAll();
-      const since = options.since ?? 0;
+      const seen = delivered[options.audience];
+      const messages = visible(loadAll(), options).filter((message) => !seen.has(message.id));
 
-      return {
-        messages: all
-          .slice(since)
-          .filter((message) => message.from !== options.audience)
-          // A message with no thread is addressed to everyone: filtering it out
-          // would make a broadcast reach nobody.
-          .filter(
-            (message) =>
-              options.thread === undefined || message.thread === null || message.thread === options.thread,
-          ),
-        // Counts every message so the cursor never rewinds just because the
-        // last few were addressed to the other side.
-        nextCursor: all.length,
-      };
+      for (const message of messages) seen.add(message.id);
+
+      return { messages, nextCursor: seen.size };
+    },
+
+    peek(options): Message[] {
+      return visible(loadAll(), options);
     },
 
     async waitForReply(options): Promise<Message | null> {

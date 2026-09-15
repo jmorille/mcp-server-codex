@@ -40,6 +40,20 @@ async function readStdin() {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main() {
+  // Emits enough accented text to cross real pipe boundaries, which is where a
+  // multi-byte character actually gets split. A short output never reproduces
+  // it: the pipe delivers it in one chunk.
+  if (args.includes('--split-utf8')) {
+    const unit = 'héllo — çà va ✓ ';
+    let text = '';
+    while (Buffer.byteLength(text, 'utf8') < 300_000) text += unit;
+    process.stdout.write(
+      `${JSON.stringify({ type: 'item.completed', item: { id: 'a1', type: 'agent_message', text } })}
+`,
+    );
+    return;
+  }
+
   // `--version` short-circuits: the server probes the binary this way at boot.
   if (args[0] === '--version') {
     process.stdout.write('codex-cli 0.154.0\n');

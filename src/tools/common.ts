@@ -10,6 +10,7 @@
 
 import { BRIDGE_THREAD_ENV, bridgeOverrides } from '../bridge/wiring.ts';
 import { assertBypassAllowed, assertSandboxAllowed } from '../config.ts';
+import { assertConfigOverridesAllowed } from '../security/config-keys.ts';
 import type { SandboxMode } from '../codex/argv.ts';
 import type { HybridOutcome } from '../jobs/hybrid.ts';
 import type { ToolContext } from './types.ts';
@@ -70,6 +71,9 @@ export function resolveCommon(context: ToolContext, input: CommonToolInput): Res
   const sandbox = input.sandbox ?? context.config.defaultSandbox;
   assertSandboxAllowed(sandbox, context.config);
   assertBypassAllowed(input.dangerously_bypass_approvals_and_sandbox === true, context.config);
+  // Checked with the other two, because a `-c` override can reach past both of
+  // them: the sandbox level means nothing if the caller can also set it.
+  assertConfigOverridesAllowed(input.config, context.config);
 
   // Resolve every caller-supplied path through the allowlist. A rejection here
   // happens before the process exists, so a refused call has no side effects.
