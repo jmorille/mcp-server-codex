@@ -1,5 +1,12 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+
+const execFileAsync = promisify(execFile);
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 import { runHybrid } from '../../src/jobs/hybrid.ts';
 import { createJobStore } from '../../src/jobs/store.ts';
@@ -128,6 +135,36 @@ describe('cancellation', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     assert.equal(jobs.get(outcome.jobId)?.status, 'cancelled');
+  });
+});
+
+describe('the race timer', () => {
+  test('keeps the process alive on its own until the timeout fires', async () => {
+    // Regression guard, run in a child process on purpose: inside the test
+    // runner something else always holds the event loop open, which masks the
+    // bug. Alone, an .unref()-ed race timer lets Node exit before the call
+    // resolves — reported by Node 22 as "Promise resolution is still pending
+    // but the event loop has already resolved", and silently survived on 24.
+    const script = path.join(here, '..', 'helpers', 'hybrid-alone.mjs');
+    const result = await execFileAsync(process.execPath, [script], { timeout: 30_000 });
+
+    assert.match(result.stdout, /resolved:background/);
+  });
+
+  test('clears the timer once the run wins the race', async () => {
+    const { runner, jobs } = context();
+    const promise = runHybrid({ runner, jobs }, { tool: 'codex_exec', args: ['exec'], timeoutMs: 600_000 });
+
+    await runner.started();
+    runner.settle();
+    await promise;
+
+    // Without the clear, a ten-minute timer would outlive every fast run and
+    // hold the process open long after the work is done.
+    assert.ok(
+      !process.getActiveResourcesInfo().includes('Timeout'),
+      'a completed run must leave no timer behind',
+    );
   });
 });
 

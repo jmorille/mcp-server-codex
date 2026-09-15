@@ -96,16 +96,27 @@ export async function runHybrid(context: HybridContext, spec: HybridSpec): Promi
 
   const timedOut = Symbol('timed-out');
 
-  const raced =
-    spec.timeoutMs <= 0
-      ? timedOut
-      : await Promise.race([
-          runPromise,
-          new Promise<typeof timedOut>((resolve) => {
-            const timer = setTimeout(() => resolve(timedOut), spec.timeoutMs);
-            timer.unref?.();
-          }),
-        ]);
+  // The race timer is deliberately *not* unref-ed: it is the only thing that
+  // can resolve this call while the run is still going, so letting the event
+  // loop drain past it would strand the caller forever. It is cleared as soon
+  // as the race is decided, so a long timeout never outlives a fast run.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let raced: Awaited<typeof runPromise> | typeof timedOut;
+
+  if (spec.timeoutMs <= 0) {
+    raced = timedOut;
+  } else {
+    try {
+      raced = await Promise.race([
+        runPromise,
+        new Promise<typeof timedOut>((resolve) => {
+          timer = setTimeout(() => resolve(timedOut), spec.timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
 
   if (raced === timedOut) {
     const partial = job.eventsSince(0);
