@@ -101,7 +101,21 @@ export const listSessionsShape = {
 };
 
 export const generateImageShape = {
-  prompt: z.string().min(1).describe('What the image should show. Plain language; the server wraps it in the spec Codex expects.'),
+  preset: z
+    .string()
+    .optional()
+    .describe(
+      'Named preset configured on this server instance. It supplies the subject, style, constraints ' +
+        'and reference art, so the prompt only has to say what differs. The tool description lists ' +
+        'the presets this instance knows; omit it on an instance that has none.',
+    ),
+  prompt: z
+    .string()
+    .min(1)
+    .describe(
+      'What the image should show. Plain language; the server wraps it in the spec Codex expects. ' +
+        'With a preset, describe only the variation — the preset already carries the subject.',
+    ),
   output_path: z
     .string()
     .min(1)

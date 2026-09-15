@@ -39,6 +39,8 @@ export interface ServerConfig {
   /** Executable Codex spawns for the bridge, and the script to hand it. */
   bridgeCommand: string;
   bridgeEntry: string;
+  /** Path to the named image presets this instance was specialised with, if any. */
+  imagePresetsFile: string | undefined;
 }
 
 export type Env = Record<string, string | undefined>;
@@ -141,6 +143,9 @@ export function loadConfig(env: Env, cwd: string): ServerConfig {
     // work, whereas a bare "node" on PATH may be a different major version.
     bridgeCommand: env.CODEX_MCP_BRIDGE_COMMAND?.trim() || process.execPath,
     bridgeEntry: env.CODEX_MCP_BRIDGE_ENTRY?.trim() || defaultBridgeEntry(),
+    // Not loaded here: reading the file belongs to the image layer, and
+    // loadConfig stays a pure reading of the environment.
+    imagePresetsFile: env.CODEX_MCP_IMAGE_PRESETS?.trim() || undefined,
   };
 }
 

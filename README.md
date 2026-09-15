@@ -85,6 +85,7 @@ Le pont publie les siennes, lues par Codex : à quel moment poser une question v
 | `CODEX_MCP_BRIDGE_TIMEOUT_SECONDS` | `90` | Attente d'un `ask_claude` côté Codex avant de rendre un `question_id`. |
 | `CODEX_MCP_BRIDGE_COMMAND` | Node courant | Exécutable que Codex lance pour le pont. |
 | `CODEX_MCP_BRIDGE_ENTRY` | `dist/bridge/index.js` | Script du pont passé à cet exécutable. |
+| `CODEX_MCP_IMAGE_PRESETS` | *(aucun)* | Fichier JSON de presets d'image nommés. C'est par là qu'une instance se spécialise. |
 
 Une valeur invalide fait **échouer le démarrage** (code 78) plutôt que de retomber silencieusement sur un défaut : une faute de frappe ne doit pas devenir une politique de sécurité différente de celle demandée.
 
@@ -139,6 +140,37 @@ Les outils d'exécution acceptent en commun : `cwd`, `model`, `sandbox`, `images
   "constraints": "pas de texte, pas de watermark"
 }
 ```
+
+#### Spécialiser une instance : les presets
+
+Le paquet ne connaît aucun sujet en particulier. C'est le **déploiement** qui le spécialise : une instance pointe `CODEX_MCP_IMAGE_PRESETS` vers un fichier JSON décrivant les sujets que son équipe dessine en boucle — une mascotte, un produit, un style maison — et les appelants nomment un preset au lieu de tout redécrire à chaque fois.
+
+```jsonc
+// ~/mon-equipe/presets.json — hors du dépôt, propre à l'instance
+{
+  "mascotte": {
+    "subject": "personnage en costume, corps ovoïde vert, antennes en feuille",
+    "style": "pixel art 16-bit, palette limitée, contours nets",
+    "constraints": "pas de watermark, fond simple",
+    "use_case": "stylized-concept",
+    "reference_images": ["./ref/mascotte.jpg"]
+  }
+}
+```
+
+```jsonc
+{ "preset": "mascotte", "prompt": "de profil, qui salue", "output_path": "sprites/salut.png" }
+```
+
+Le preset fournit des **défauts**, jamais un verrou : tout champ donné à l'appel gagne, si bien qu'une image peut s'écarter du style maison sans le redéfinir.
+
+Trois choix qui méritent d'être dits :
+
+- **L'instance annonce ses presets.** Leurs noms sont ajoutés à la description de `codex_generate_image`, sinon l'agent appelant n'aurait aucun moyen d'apprendre qu'ils existent.
+- **Les chemins relatifs se résolvent depuis le fichier de presets**, pas depuis le répertoire courant du serveur : le preset et son image de référence voyagent ensemble, alors que le répertoire de lancement est accidentel.
+- **Un fichier illisible, un JSON invalide ou un champ inconnu font échouer le démarrage.** Un preset silencieusement ignoré produirait des images génériques qui ressemblent à un raté du modèle, et personne n'irait regarder la configuration.
+
+Les images de référence d'un preset passent par l'allowlist comme les autres : être de la configuration ne vaut pas dérogation.
 
 L'outil renvoie le **chemin** du fichier, pas les octets : un PNG de 850 Ko pèse ~1,1 Mo en base64 et saturerait le contexte de l'agent appelant.
 

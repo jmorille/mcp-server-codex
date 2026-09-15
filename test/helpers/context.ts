@@ -5,6 +5,7 @@ import path from 'node:path';
 import { openMailbox } from '../../src/bridge/mailbox.ts';
 import { loadConfig } from '../../src/config.ts';
 import type { Env } from '../../src/config.ts';
+import { loadImagePresets } from '../../src/images/presets.ts';
 import { createPathPolicy } from '../../src/security/paths.ts';
 import { createJobStore } from '../../src/jobs/store.ts';
 import type { ToolContext } from '../../src/tools/types.ts';
@@ -46,6 +47,7 @@ export function createTestContext(env: Env = {}): TestContext {
     jobs: createJobStore({ maxEvents: config.maxEvents, ttlMs: config.jobTtlMs }),
     paths: createPathPolicy(config.allowedRoots),
     bridge: openMailbox(config.bridgeDir),
+    imagePresets: loadImagePresets(config.imagePresetsFile),
     workspace,
     // A sibling of the workspace inside the system temp directory: absolute on
     // both platforms, and never a descendant of the single allowed root.

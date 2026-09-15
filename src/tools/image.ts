@@ -26,11 +26,14 @@ import path from 'node:path';
 import { buildExecArgs } from '../codex/argv.ts';
 import { runHybrid } from '../jobs/hybrid.ts';
 import type { HybridOutcome } from '../jobs/hybrid.ts';
+import type { ImagePreset } from '../images/presets.ts';
 import { bridgeArgsFor, resolveCommon } from './common.ts';
 import type { CommonToolInput } from './common.ts';
 import type { ToolContext } from './types.ts';
 
 export interface GenerateImageToolInput extends CommonToolInput {
+  /** Named preset this server instance was configured with. */
+  preset?: string;
   prompt: string;
   output_path: string;
   use_case?: string;
@@ -134,25 +137,59 @@ async function findGeneratedImage(codexHome: string, threadId: string): Promise<
   return (found[0] as { full: string }).full;
 }
 
+/**
+ * Resolve a named preset, or fail with something the caller can act on.
+ *
+ * Presets are what specialises an instance: the package ships none, and a
+ * deployment supplies the subjects its users draw repeatedly. So a miss here is
+ * almost always a name typo or the wrong instance, and the message says which.
+ */
+function presetFor(context: ToolContext, name: string): ImagePreset {
+  const known = Object.keys(context.imagePresets);
+
+  if (known.length === 0) {
+    throw new Error(
+      `This server has no image presets, so "${name}" cannot be resolved. ` +
+        'Presets come from the instance: point CODEX_MCP_IMAGE_PRESETS at a JSON file, ' +
+        'or call this tool without "preset" and describe the subject in the prompt.',
+    );
+  }
+
+  const preset = context.imagePresets[name];
+  if (preset === undefined) {
+    throw new Error(`Unknown image preset "${name}". This server knows: ${known.join(', ')}.`);
+  }
+  return preset;
+}
+
 export async function generateImageTool(
   context: ToolContext,
   input: GenerateImageToolInput,
 ): Promise<GenerateImageResult> {
+  // A preset supplies defaults only; anything the call states wins, so one
+  // call can depart from the house style without redefining it.
+  const preset = input.preset !== undefined ? presetFor(context, input.preset) : {};
+
   const outputPath = context.paths.resolve(input.output_path);
-  const referenceImages = input.reference_images?.map((ref) => context.paths.resolve(ref));
+  // Preset references go through the allowlist like any other path: being
+  // configuration does not make them exempt.
+  const references = input.reference_images ?? preset.referenceImages;
+  const referenceImages = references?.map((ref) => context.paths.resolve(ref));
 
   // The agent has to write a file, so a read-only sandbox would guarantee
   // failure. This overrides the server default on purpose.
   const common = resolveCommon(context, { ...input, sandbox: 'workspace-write' });
 
   const composedPrompt = composeImagePrompt({
-    prompt: input.prompt,
+    // The preset describes the recurring subject, the call describes this
+    // particular image of it.
+    prompt: preset.subject ? `${preset.subject}, ${input.prompt}` : input.prompt,
     outputPath,
-    useCase: input.use_case,
-    size: input.size,
-    transparent: input.transparent,
-    style: input.style,
-    constraints: input.constraints,
+    useCase: input.use_case ?? preset.useCase,
+    size: input.size ?? preset.size,
+    transparent: input.transparent ?? preset.transparent,
+    style: input.style ?? preset.style,
+    constraints: input.constraints ?? preset.constraints,
     referenceImages,
   });
 

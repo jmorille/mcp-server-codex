@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
 import { createServer, SERVER_VERSION } from '../src/server.ts';
@@ -17,8 +20,8 @@ afterEach(() => {
 });
 
 /** A real MCP client talking to the real server over an in-memory transport. */
-async function connect(): Promise<{ client: Client; ctx: TestContext }> {
-  ctx = createTestContext();
+async function connect(env: Record<string, string> = {}): Promise<{ client: Client; ctx: TestContext }> {
+  ctx = createTestContext(env);
   const server = createServer(ctx);
   const client = new Client({ name: 'test-client', version: '0.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -87,6 +90,32 @@ describe('server description', () => {
     for (const topic of [/sandbox/i, /thread_id|codex_resume/, /codex_inbox|bridge|pont/i]) {
       assert.match(instructions, topic);
     }
+  });
+});
+
+describe('instance specialisation', () => {
+  test('advertises the presets this instance was configured with', async () => {
+    // Specialisation lives in the deployment, so the only way a calling agent
+    // can learn a preset exists is for the instance to say so.
+    const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-codex-adv-')));
+    fs.writeFileSync(path.join(workspace, 'p.json'), JSON.stringify({ mascot: {}, packshot: {} }));
+    const { client } = await connect({
+      CODEX_MCP_ALLOWED_ROOTS: workspace,
+      CODEX_MCP_IMAGE_PRESETS: path.join(workspace, 'p.json'),
+    });
+
+    const tool = (await client.listTools()).tools.find((t) => t.name === 'codex_generate_image');
+
+    assert.match(tool?.description ?? '', /mascot/);
+    assert.match(tool?.description ?? '', /packshot/);
+  });
+
+  test('says nothing about presets on an instance that has none', async () => {
+    // A plain install must not advertise a feature it cannot serve.
+    const { client } = await connect();
+    const tool = (await client.listTools()).tools.find((t) => t.name === 'codex_generate_image');
+
+    assert.doesNotMatch(tool?.description ?? '', /preset/i);
   });
 });
 

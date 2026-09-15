@@ -130,6 +130,24 @@ function outcomePayload(outcome: HybridOutcome): Record<string, unknown> {
   };
 }
 
+/**
+ * Name this instance's presets in the tool description.
+ *
+ * Specialisation lives in the deployment, not in the package, so a calling
+ * agent has no other way to learn that a preset exists. An instance with none
+ * says nothing, rather than advertising a feature it cannot serve.
+ */
+function presetHint(context: ToolContext): string {
+  const names = Object.keys(context.imagePresets);
+  if (names.length === 0) return '';
+
+  return (
+    ` This instance is configured with named presets: ${names.join(', ')}. ` +
+    'Pass one as "preset" to reuse its subject, style and reference art instead of restating them, ' +
+    'and describe only what differs in the prompt (a pose, an angle, a variation).'
+  );
+}
+
 const WRITES = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
 const READS = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 
@@ -303,7 +321,7 @@ export function createServer(context: ToolContext): McpServer {
       description:
         'Generate an image using the image_gen tool built into Codex, and save it to output_path. ' +
         'No API key is needed: it runs through your Codex session. Returns the path of the file ' +
-        'written, not the image bytes.',
+        'written, not the image bytes.' + presetHint(context),
       inputSchema: generateImageShape,
       annotations: WRITES,
     },
