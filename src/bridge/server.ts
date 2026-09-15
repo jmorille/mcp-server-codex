@@ -21,6 +21,36 @@ import type { Message } from './mailbox.ts';
 
 export const BRIDGE_SERVER_NAME = 'claude-bridge';
 
+/** What Codex sees when it lists this server among its own. */
+export const BRIDGE_DESCRIPTION =
+  'A direct line to the Claude agent supervising this run. Use it to get a decision you cannot make ' +
+  'alone, to report something the supervisor should act on, and to pick up instructions it sent you ' +
+  'mid-task. Messages are queued, so nothing is lost if either side is busy.';
+
+/**
+ * Why this is worth saying out loud.
+ *
+ * Left to itself a model guesses at an ambiguous requirement and finds out it
+ * guessed wrong at the end. These instructions exist to make asking the
+ * cheaper option, and to make clear that a slow answer is not a dead end.
+ */
+export const BRIDGE_INSTRUCTIONS = [
+  'You are not working alone. A Claude agent is supervising this run and can answer questions ' +
+    'while you work.',
+  'Ask with ask_claude when a decision is genuinely not yours to make: an ambiguous requirement, a ' +
+    'choice between approaches with real trade-offs, permission for something destructive or ' +
+    'expensive, or a contradiction between what you were told and what the code does. One question ' +
+    'costs seconds; guessing wrong costs the whole task.',
+  'Do not ask for things you can find out yourself. Read the file, run the command, check the test.',
+  'ask_claude blocks, but never forever. If it times out you get a question_id back instead of an ' +
+    'error: keep going with whatever does not depend on the answer, then collect it later with ' +
+    'check_claude. The question stays queued.',
+  'Call check_claude between steps of anything long. The supervisor can send a correction or a stop ' +
+    'without you having asked, and you will only see it when you look.',
+  'Use tell_claude for things worth knowing but not worth waiting on: a finding, a surprise, a ' +
+    'warning, progress on a long task.',
+].join('\n\n');
+
 export interface BridgeServerOptions {
   /** Directory both processes share. Created on first post. */
   mailboxDir: string;
@@ -57,7 +87,10 @@ function messagePayload(message: Message): Record<string, unknown> {
 export function createBridgeServer(options: BridgeServerOptions): McpServer {
   const box = openMailbox(options.mailboxDir);
   const pollMs = options.pollMs ?? 250;
-  const server = new McpServer({ name: BRIDGE_SERVER_NAME, version: '1' });
+  const server = new McpServer(
+    { name: BRIDGE_SERVER_NAME, version: '1', description: BRIDGE_DESCRIPTION },
+    { instructions: BRIDGE_INSTRUCTIONS },
+  );
 
   server.registerTool(
     'ask_claude',

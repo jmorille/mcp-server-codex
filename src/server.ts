@@ -133,8 +133,58 @@ function outcomePayload(outcome: HybridOutcome): Record<string, unknown> {
 const WRITES = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
 const READS = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 
+/**
+ * What a client sees before it has called anything.
+ *
+ * This is the text an operator reads when deciding whether to install a server
+ * that can run code on their machine, so it says what it drives, what that is
+ * good for, and where the limits are — not just that it exists.
+ */
+export const SERVER_DESCRIPTION =
+  'Drives the Codex CLI locally, so an agent can hand a coding task to a second autonomous agent ' +
+  'instead of doing it turn by turn. Codex is at its best on work that is long, mechanical and ' +
+  'verifiable: a refactor across many files, making a failing suite pass, a code review, tracing a ' +
+  'bug through an unfamiliar codebase. It runs commands and edits files inside a sandbox, under a ' +
+  'directory allowlist this server enforces before any process starts. Runs that outlast the caller ' +
+  'move to the background and are polled by job id, sessions can be resumed or forked, and a built-in ' +
+  'two-way bridge lets a running Codex agent ask the calling agent a question mid-task rather than ' +
+  'guessing. Also exposes Codex image generation.';
+
+/**
+ * Guidance for the agent on the other end.
+ *
+ * It already sees every tool and its schema, so repeating them here would be
+ * noise. What it cannot see is *when* delegating beats doing the work itself,
+ * and which of this server's behaviours will surprise it.
+ */
+export const SERVER_INSTRUCTIONS = [
+  'Use Codex when the work is large, repetitive or needs its own verify loop — a refactor spanning ' +
+    'many files, making a test suite pass, reviewing a diff, or exploring a codebase you do not know. ' +
+    'For a single edit you already understand, doing it yourself is faster and cheaper than a round ' +
+    'trip through another agent.',
+  'Give it an outcome, not a procedure. Codex runs its own commands and iterates; a prompt that ' +
+    'states the goal and how to check it ("make `npm test` pass without weakening the assertions") ' +
+    'produces better work than a list of steps.',
+  'Runs are hybrid. If a call outlasts timeout_seconds it does not fail and is not cancelled: it ' +
+    'returns mode="background" with a job_id, and you follow it with codex_job_status and ' +
+    'codex_job_logs (cursor-paged via since), or stop it with codex_job_cancel.',
+  'Every run reports a thread_id. Pass it to codex_resume to continue with the full history instead ' +
+    'of re-explaining the context, or to codex_fork to try a different approach from the same ' +
+    'starting point while leaving the original intact.',
+  'Two guardrails will reject a call before anything is spawned, and both messages are actionable: ' +
+    'paths outside the server allowlist (cwd, add_dir, images, output_path), and sandbox levels the ' +
+    'server was not unlocked for. The sandbox defaults to workspace-write; pass sandbox="read-only" ' +
+    'when the task is meant to inspect rather than change.',
+  'The bridge is always live. A Codex run can ask you a question mid-task and block on the answer: ' +
+    'poll codex_inbox while a run is in flight, answer with codex_reply (the run resumes at once), ' +
+    'and use codex_tell to correct or stop it. Omitting job_id on codex_tell reaches every run.',
+].join('\n\n');
+
 export function createServer(context: ToolContext): McpServer {
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+  const server = new McpServer(
+    { name: SERVER_NAME, version: SERVER_VERSION, description: SERVER_DESCRIPTION },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   server.registerTool(
     'codex_exec',

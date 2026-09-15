@@ -55,6 +55,41 @@ describe('server identity', () => {
   });
 });
 
+describe('server description', () => {
+  test('publishes what the server is for, not just its name', async () => {
+    // This is what shows up in a client's server listing. A name alone leaves
+    // an operator guessing whether installing it is worth the risk.
+    const { client } = await connect();
+    const info = client.getServerVersion();
+
+    assert.ok(info?.description, 'the server must publish a description');
+    assert.ok(
+      info.description.length > 120,
+      `a one-liner does not say what this is for, got: ${info.description}`,
+    );
+  });
+
+  test('names Codex, so the description says whose agent this drives', async () => {
+    const { client } = await connect();
+    const description = client.getServerVersion()?.description ?? '';
+
+    assert.match(description, /Codex/);
+  });
+
+  test('tells the calling model when reaching for Codex is the right move', async () => {
+    // Instructions are read by the agent on the other end, which has to choose
+    // between doing the work itself and delegating it. Listing the tools again
+    // would be useless; what it needs is the "when".
+    const { client } = await connect();
+    const instructions = client.getInstructions() ?? '';
+
+    assert.ok(instructions.length > 300, `instructions too thin to steer a choice: ${instructions}`);
+    for (const topic of [/sandbox/i, /thread_id|codex_resume/, /codex_inbox|bridge|pont/i]) {
+      assert.match(instructions, topic);
+    }
+  });
+});
+
 describe('tool registration', () => {
   test('exposes exactly the documented tool set', async () => {
     const { client } = await connect();

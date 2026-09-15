@@ -53,6 +53,24 @@ describe('bridge tool surface', () => {
     assert.deepEqual(tools.map((t) => t.name).sort(), ['ask_claude', 'check_claude', 'tell_claude']);
   });
 
+  test('publishes what the bridge is, so Codex knows who it is talking to', async () => {
+    const client = await connect();
+    const info = client.getServerVersion();
+
+    assert.ok(info?.description, 'the bridge must publish a description');
+    assert.match(info.description, /Claude/);
+  });
+
+  test('tells Codex when speaking up is worth it', async () => {
+    // Left to itself a model guesses rather than asks. The instructions are the
+    // only place to say that asking is allowed, and when it is the right call.
+    const client = await connect();
+    const instructions = client.getInstructions() ?? '';
+
+    assert.ok(instructions.length > 200, `instructions too thin to change behaviour: ${instructions}`);
+    assert.match(instructions, /ask_claude/);
+  });
+
   test('describes each tool well enough for Codex to pick one', async () => {
     const client = await connect();
     const { tools } = await client.listTools();

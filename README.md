@@ -59,6 +59,16 @@ claude mcp add codex -- node C:/chemin/vers/mcp-server-codex/dist/index.js
 
 Le serveur parle **stdio**. Tous ses diagnostics vont sur `stderr` : `stdout` transporte le protocole et écrire dedans corromprait la session.
 
+### Ce que le client voit à l'initialisation
+
+Le serveur publie une **description** — ce qu'il pilote et à quoi ça sert, lu par l'humain qui décide de l'installer — et des **instructions** lues par l'agent appelant, qui doit arbitrer entre faire le travail lui-même et le déléguer.
+
+> Drives the Codex CLI locally, so an agent can hand a coding task to a second autonomous agent instead of doing it turn by turn. Codex is at its best on work that is long, mechanical and verifiable: a refactor across many files, making a failing suite pass, a code review, tracing a bug through an unfamiliar codebase. […]
+
+Les instructions couvrent ce que le schéma des outils ne dit pas : **quand** déléguer à Codex plutôt que d'éditer soi-même, donner un objectif vérifiable plutôt qu'une procédure, le fait qu'un dépassement de délai rende un `job_id` au lieu d'échouer, la reprise par `thread_id`, les deux garde-fous qui rejettent un appel avant tout lancement, et le pont.
+
+Le pont publie les siennes, lues par Codex : à quel moment poser une question vaut mieux que deviner, et qu'une question expirée n'est pas une impasse.
+
 ## Variables d'environnement
 
 | Variable | Défaut | Rôle |
