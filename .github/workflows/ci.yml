@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# The default token only ever needs to read the repository here.
+permissions:
+  contents: read
+
+# A new push supersedes an in-flight run on the same ref, except on main where
+# every commit deserves its own verdict.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is not optional cover: the path allowlist, the drive-letter
+        # handling and the 8191-character command-line limit this server works
+        # around are all Windows-specific behaviours.
+        os: [ubuntu-latest, windows-latest]
+        # 22 resolves to 22.18+, the first release where Node strips TypeScript
+        # types without a flag. The test suite runs .ts files directly.
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  runtime-floor:
+    name: built output loads on the oldest supported node
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with a modern toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # package.json claims >=20.12.0; this proves the claim instead of
+      # trusting it. The tests cannot run here — 20.x has no type stripping —
+      # so we check that the compiled output actually loads.
+      - name: Load dist on node 20.12
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.12'
+      - run: node --input-type=module -e "await import('./dist/server.js'); await import('./dist/runtime.js'); console.log('dist loads on', process.version)"

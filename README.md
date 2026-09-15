@@ -1,0 +1,226 @@
+# mcp-server-codex
+
+Serveur **MCP (Model Context Protocol)** en TypeScript pour piloter le **CLI Codex** localement : lancer des sessions d'agent, les reprendre, les bifurquer, faire des revues de code, appliquer des diffs et générer des images — le tout depuis n'importe quel client MCP (Claude Code, Claude Desktop, Codex lui-même…).
+
+> Le code, les identifiants et les messages d'erreur sont en anglais : ils sont lus par des agents. La documentation est en français.
+
+## Ce que ça fait
+
+Le CLI Codex est conçu pour un humain devant un terminal. Ce serveur le rend pilotable par un agent :
+
+- Il force `--json` partout et parse le flux JSONL en résultats structurés.
+- Il gère les runs longs sans faire tomber l'appel d'outil (voir *Exécution hybride*).
+- Il restreint ce que Codex peut toucher sur le disque.
+- Il expose la génération d'images, que Codex n'offre pas comme service appelable.
+
+## Prérequis
+
+| Outil | Rôle | Installation Windows |
+|---|---|---|
+| **Codex CLI** ≥ 0.154 | le binaire piloté | `npm i -g @openai/codex` *(recommandé)* ou `winget install OpenAI.Codex` |
+| **Node.js** ≥ 22.6 | exécution du serveur | `winget install OpenJS.NodeJS` (fournit aussi `npm`) |
+| **git** | `codex exec` refuse de tourner hors dépôt ; requis par les cibles de revue | `winget install Git.Git` |
+
+Vous devez être authentifié côté Codex (`codex login`). Le serveur n'a besoin d'**aucune** clé API, y compris pour les images.
+
+> ⚠️ La version de Codex publiée sur winget est en retard sur celle de npm. Ce serveur est écrit contre le comportement de la **0.154** (voir *Notes d'implémentation*). Préférez npm. Un Codex installé par npm n'apparaît pas dans `winget list` : évitez de mélanger les deux voies, sous peine d'avoir deux binaires concurrents dans le `PATH`. En cas de doute, pointez `CODEX_BIN` sur le bon exécutable.
+
+## Installation
+
+```bash
+npm install
+npm run build
+```
+
+## Configuration client
+
+### Claude Code
+
+```bash
+claude mcp add codex -- node C:/chemin/vers/mcp-server-codex/dist/index.js
+```
+
+### Claude Desktop / configuration JSON générique
+
+```json
+{
+  "mcpServers": {
+    "codex": {
+      "command": "node",
+      "args": ["C:/chemin/vers/mcp-server-codex/dist/index.js"],
+      "env": {
+        "CODEX_MCP_ALLOWED_ROOTS": "C:/projets/mon-app",
+        "CODEX_MCP_DEFAULT_SANDBOX": "workspace-write"
+      }
+    }
+  }
+}
+```
+
+Le serveur parle **stdio**. Tous ses diagnostics vont sur `stderr` : `stdout` transporte le protocole et écrire dedans corromprait la session.
+
+## Variables d'environnement
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `CODEX_BIN` | `codex` | Chemin ou nom du binaire Codex. |
+| `CODEX_HOME` | `~/.codex` | Racine Codex : sessions et images générées y sont lues. |
+| `CODEX_MCP_ALLOWED_ROOTS` | cwd du serveur | Répertoires autorisés, séparés par `;` (Windows) ou `:`. **Liste exhaustive** : la définir remplace le défaut, elle ne s'y ajoute pas. |
+| `CODEX_MCP_ALLOW_DANGEROUS` | `0` | À `1`, débloque `danger-full-access` et le contournement des approbations. |
+| `CODEX_MCP_DEFAULT_SANDBOX` | `workspace-write` | Sandbox par défaut : `read-only`, `workspace-write` ou `danger-full-access`. |
+| `CODEX_MCP_DEFAULT_TIMEOUT_SECONDS` | `120` | Attente avant bascule en arrière-plan. `0` = toujours en arrière-plan. |
+| `CODEX_MCP_MAX_EVENTS` | `2000` | Taille du tampon d'événements par job. |
+| `CODEX_MCP_JOB_TTL_SECONDS` | `1800` | Durée de consultation d'un job terminé. |
+
+Une valeur invalide fait **échouer le démarrage** (code 78) plutôt que de retomber silencieusement sur un défaut : une faute de frappe ne doit pas devenir une politique de sécurité différente de celle demandée.
+
+## Exécution hybride
+
+Un run Codex dure de quelques secondes à plusieurs dizaines de minutes, alors que les clients MCP coupent les appels d'outil bien avant. Chaque outil d'exécution fait donc la course contre son propre `timeout_seconds` :
+
+- **il finit à temps** → résultat complet en un aller-retour ;
+- **le délai expire** → le processus **continue**, l'appel rend un `job_id` immédiatement.
+
+Le délai n'annule jamais le run : perdre dix minutes de travail du modèle à cause d'une échéance arbitraire du client est précisément ce que ce design évite.
+
+```
+codex_exec { prompt: "…", timeout_seconds: 60 }
+  └─ dépassement → { job_id: "job-3-a1b2", mode: "background", thread_id: "…" }
+       ├─ codex_job_status { job_id }
+       ├─ codex_job_logs   { job_id, since: 42 }   ← pagination par curseur
+       └─ codex_job_cancel { job_id }              ← SIGTERM puis SIGKILL
+```
+
+Les jobs vivent le temps de la session MCP.
+
+## Outils
+
+| Outil | Rôle |
+|---|---|
+| `codex_exec` | Nouvelle session Codex sur un prompt. Rend le message final, les commandes exécutées et un `thread_id`. |
+| `codex_resume` | Reprend une session avec tout son historique (`session_id` ou `last: true`). |
+| `codex_fork` | Bifurque une session existante, l'originale reste intacte. |
+| `codex_review` | Revue de code : `uncommitted` (défaut), `base`, ou `commit`. |
+| `codex_apply` | Applique le dernier diff d'une tâche Codex (`git apply`). |
+| `codex_list_sessions` | Liste les sessions enregistrées. Lecture disque, aucun processus lancé. |
+| `codex_generate_image` | Génère une image et l'écrit sur disque. |
+| `codex_job_status` | État d'un run passé en arrière-plan. |
+| `codex_job_logs` | Événements JSONL paginés d'un job, filtrables par type. |
+| `codex_job_cancel` | Arrête un run en cours. |
+
+Les outils d'exécution acceptent en commun : `cwd`, `model`, `sandbox`, `images`, `config`, `enable`, `disable`, `output_schema`, `worktree`, `ephemeral`, `skip_git_repo_check`, `timeout_seconds`.
+
+### Génération d'images
+
+```jsonc
+{
+  "prompt": "un robot bleu, style plat minimaliste",
+  "output_path": "assets/robot.png",
+  "use_case": "logo-brand",
+  "size": "1024x1024",
+  "transparent": true,
+  "constraints": "pas de texte, pas de watermark"
+}
+```
+
+L'outil renvoie le **chemin** du fichier, pas les octets : un PNG de 850 Ko pèse ~1,1 Mo en base64 et saturerait le contexte de l'agent appelant.
+
+Codex n'expose aucun service de génération d'images : le protocole app-server contient `ImageGenerationThreadItem` comme *type d'événement* mais aucune méthode RPC `image/*`, et il n'existe pas de sous-commande `codex image`. Le seul accès est agentique — le modèle décide d'appeler son outil interne `image_gen`, guidé par la skill système `imagegen`. Ce serveur en tire deux conséquences :
+
+1. **Le prompt est composé, pas transmis tel quel.** La skill attend une spécification étiquetée (`Use case:`, `Primary request:`, `Constraints:`…) ; lui donner du texte brut dégrade nettement le résultat.
+2. **Le fichier doit être retrouvé.** `image_gen` n'émet aucun item JSONL : le flux d'événements ne dit jamais où l'image a atterri. Le serveur vérifie donc `output_path`, puis se rabat sur `$CODEX_HOME/generated_images/<thread_id>/` et y copie le fichier le plus récent. Si les deux échouent, il le dit explicitement plutôt que de renvoyer un chemin fantôme.
+
+## Sécurité
+
+L'installation d'un serveur MCP donne à un agent la capacité d'exécuter du code sur votre machine. Les défauts sont donc restrictifs :
+
+- **Allowlist de répertoires.** Tout `cwd`, `add_dir`, `images`, `output_schema` et `output_path` est résolu en chemin réel — **liens symboliques compris** — puis vérifié comme descendant d'une racine autorisée. Un chemin refusé l'est *avant* tout lancement de processus : un appel rejeté n'a aucun effet de bord.
+- **Sandbox par défaut** `workspace-write`, approbations sur `never` (aucun humain n'est là pour répondre ; un refus revient au modèle comme un échec exploitable au lieu de bloquer le run).
+- **`danger-full-access` et `--dangerously-bypass-approvals-and-sandbox` sont refusés** sauf `CODEX_MCP_ALLOW_DANGEROUS=1`.
+
+Le garde-fou de chemins ne protège pas contre un Codex lancé en `danger-full-access` : ce mode retire les limites côté Codex lui-même.
+
+## Notes d'implémentation
+
+Trois comportements de Codex 0.154, vérifiés empiriquement, façonnent le code :
+
+1. **Seul `codex exec` accepte `-s/--sandbox`, `-C/--cd`, `--add-dir` et `-p/--profile`.** `exec resume`, `exec fork` et `exec review` ne les ont pas : le sandbox y passe par `-c sandbox_mode="…"`.
+2. **Le `codex review` de premier niveau n'a pas `--json`** — seul `codex exec review` l'a. Toutes les revues passent donc par `exec review`.
+3. **Codex lit stdin dès qu'il n'est pas sur un TTY** (« Reading additional input from stdin… »). Le prompt est toujours passé via `-` sur stdin, puis stdin est refermé. Cela contourne aussi la limite de 8191 caractères de la ligne de commande Windows et tout l'échappement de quotes.
+
+`codex resume` sans identifiant ouvre un sélecteur TUI, impilotable en MCP : `codex_list_sessions` lit donc directement `$CODEX_HOME/sessions/**/rollout-*.jsonl` (source de vérité) et enrichit avec `$CODEX_HOME/session_index.jsonl`, qui ne contient que les threads *nommés*. Seule la première ligne de chaque rollout est lue — ces fichiers atteignent couramment des dizaines de méga-octets.
+
+Le parseur JSONL est délibérément tolérant : un `item.type` inconnu est conservé tel quel plutôt que rejeté, pour qu'une montée de version de Codex dégrade le résumé au lieu de casser le serveur.
+
+## CI/CD et publication
+
+Deux workflows GitHub Actions, sans secret à configurer : le `GITHUB_TOKEN` fourni automatiquement suffit.
+
+### `ci.yml` — à chaque push et pull request sur `main`
+
+Matrice **Node 22 et 24 × Ubuntu et Windows** : typecheck, tests, build. Windows n'est pas du zèle — l'allowlist de chemins, la gestion des lettres de lecteur et le contournement de la limite de 8191 caractères sont des comportements spécifiquement Windows.
+
+Un job supplémentaire vérifie le **plancher d'exécution** : `package.json` annonce `node >= 20.12`, ce job construit avec une chaîne récente puis charge le `dist/` sous Node 20.12. Les tests ne peuvent pas y tourner (pas de type stripping avant 22.18), mais la promesse est prouvée au lieu d'être supposée.
+
+### `release.yml` — sur un tag `v*`
+
+```bash
+npm version patch   # ou minor / major : met à jour package.json et crée le tag
+git push --follow-tags
+```
+
+Le workflow rejoue typecheck, tests et build sur **l'arbre exact qui va être publié** — CI prouve qu'un commit est sain, la release prouve que le tag l'est —, puis publie sur `npm.pkg.github.com` et crée la GitHub Release avec des notes générées. Un `workflow_dispatch` permet de rejouer une release à partir d'un tag existant.
+
+**Garde-fou de version** : si le tag et `package.json` divergent, la publication échoue avant le `npm publish`. Une version npm ne pouvant jamais être republiée, une release mal étiquetée serait définitive.
+
+**Scope dérivé à la publication.** GitHub Packages n'accepte qu'un paquet scopé au compte propriétaire. Plutôt que de figer un owner dans le dépôt — ce qui casserait tout fork —, `scripts/github-package.mjs` réécrit le nom en `@owner/mcp-server-codex` au moment de publier, à partir de `github.repository_owner`, en le passant en minuscules (GitHub conserve la casse des comptes, npm la refuse).
+
+### Installer depuis GitHub Packages
+
+Le registre GitHub exige une authentification, **même en lecture**. Dans le `.npmrc` du projet consommateur :
+
+```ini
+@owner:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+avec un token portant le scope `read:packages`, puis :
+
+```bash
+npm install @owner/mcp-server-codex
+```
+
+## Développement
+
+```bash
+npm test          # 194 tests, sans lancer Codex ni consommer de tokens
+npm run typecheck
+npm run build
+```
+
+Le développement demande **Node ≥ 22.18**, première version où le type stripping est actif sans drapeau : la suite exécute les `.ts` directement. Le paquet publié, lui, n'est que du JavaScript compilé et tourne dès Node 20.12.
+
+Node exécute TypeScript nativement : ni `tsx` ni `ts-node`.
+
+L'architecture tient à une couture : **toute** interaction avec le système passe par `CodexRunner` (`src/codex/runner.ts`). Les tests unitaires injectent soit un faux binaire Codex scriptable (`test/helpers/fake-codex.mjs`, qui exerce le vrai chemin spawn/stdin/streaming/annulation), soit un runner stub piloté à la main pour les scénarios de timeout et d'annulation.
+
+```
+src/
+  index.ts            binaire, transport stdio
+  runtime.ts          racine de composition
+  server.ts           enregistrement MCP des outils
+  schemas.ts          schémas zod (les descriptions sont lues par l'agent appelant)
+  config.ts           environnement et garde-fous
+  codex/argv.ts       pur : options → argv
+  codex/events.ts     pur : JSONL → événements typés → résumé
+  codex/runner.ts     seule couture avec le système
+  codex/sessions.ts   lecture des sessions sur disque
+  jobs/store.ts       registre, tampon circulaire, TTL
+  jobs/hybrid.ts      course run / timeout
+  security/paths.ts   allowlist de racines
+  tools/              un fichier par outil
+```
+
+## Licence
+
+MIT

@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release, e.g. v0.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write # create the GitHub Release
+  packages: write # publish to npm.pkg.github.com
+
+# Releases must never overlap: an npm version cannot be republished, so a
+# cancelled half-publish is unrecoverable.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: publish to GitHub Packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0 # release notes are generated from history
+
+      - name: Resolve the tag and the npm scope
+        id: meta
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          # GitHub keeps the case of account names; npm scopes must be lowercase.
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "owner=$OWNER" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG as @$OWNER/*"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@${{ steps.meta.outputs.owner }}'
+
+      - run: npm ci
+
+      # The full suite runs again here on purpose. CI proves a commit is sound;
+      # this proves the exact tree being published is.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Scope the manifest and check the tag against it
+        run: node scripts/github-package.mjs "${{ steps.meta.outputs.owner }}" "${{ github.repository }}" "${{ steps.meta.outputs.tag }}"
+
+      - name: Publish
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            --title "${{ steps.meta.outputs.tag }}" \
+            --generate-notes \
+            --verify-tag \
+            || gh release edit "${{ steps.meta.outputs.tag }}" --draft=false
